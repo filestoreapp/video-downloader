@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Media Downloader",
+  title: "SnapDown — YouTube & Instagram Downloader",
   description: "Download YouTube videos & audio, Instagram reels & photos, and cut clips.",
   robots: { index: false, follow: false },
 };
