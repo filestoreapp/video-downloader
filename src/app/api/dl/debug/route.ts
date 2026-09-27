@@ -40,6 +40,21 @@ export async function GET(req: Request) {
     const { stdout } = await execFileAsync("node", [script, "--version"], { timeout: 20000 });
     return `${stdout.trim()} in ${Date.now() - s}ms`;
   });
+  await t("real_script_help", async () => {
+    // Exercises the REAL script (all heavy imports). If the slim npm
+    // install is broken this fails fast with MODULE_NOT_FOUND instead.
+    const s = Date.now();
+    try {
+      const { stdout } = await execFileAsync(
+        "node", [path.join(root, "pot-server", "build", "generate_once.real.js"), "--help"],
+        { timeout: 90000 }
+      );
+      return `imports OK in ${Date.now() - s}ms, help lines: ${stdout.split("\n").length}`;
+    } catch (e) {
+      const err = e as { stderr?: string; message?: string };
+      return `IMPORT FAIL in ${Date.now() - s}ms: ${String(err.stderr ?? err.message).slice(0, 400).replace(/\n/g, " | ")}`;
+    }
+  });
   await t("plugin_load", async () => {
     const { stdout, stderr } = await execFileAsync(
       bin,
