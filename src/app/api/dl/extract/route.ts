@@ -28,15 +28,13 @@ export async function POST(req: Request) {
   }
 
   try {
+    const t0 = Date.now();
     const result = await extractMedia(url);
+    console.log(`[extract] ok ${result.platform} in ${Date.now() - t0}ms :: ${url.slice(0, 80)}`);
     return NextResponse.json(result);
   } catch (err) {
-    return NextResponse.json(
-      {
-        error:
-          err instanceof Error ? err.message : "Extraction failed. Please try again.",
-      },
-      { status: 502 }
-    );
+    const msg = err instanceof Error ? err.message : "Extraction failed. Please try again.";
+    console.error(`[extract] FAIL :: ${url.slice(0, 80)} :: ${msg}`);
+    return NextResponse.json({ error: msg }, { status: 502 });
   }
 }

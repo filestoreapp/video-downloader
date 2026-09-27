@@ -133,6 +133,7 @@ async function ytdlpJson(url: string, timeoutMs = 25000): Promise<unknown> {
     const msg = String(
       (err as { stderr?: unknown }).stderr ?? (err as Error).message ?? err
     );
+    console.error(`[ytdlp] FAIL :: ${msg.slice(0, 300).replace(/\n/g, " | ")}`);
     if (/registered users|login|cookies|private/i.test(msg)) {
       throw new Error("This post is private or needs login. Only public posts work.");
     }
@@ -286,13 +287,25 @@ async function resolveYoutubeFallback(url: string): Promise<ResolvedMedia> {
 }
 
 export async function resolveYoutube(url: string): Promise<ResolvedMedia> {
+  const t0 = Date.now();
   try {
-    return await resolveYoutubeFast(url);
-  } catch {
+    const r = await resolveYoutubeFast(url);
+    console.log(`[youtube] fast ok in ${Date.now() - t0}ms`);
+    return r;
+  } catch (e) {
+    console.error(`[youtube] fast FAIL in ${Date.now() - t0}ms: ${(e as Error).message}`);
     // Fast path failed (e.g. network-level block) — yt-dlp is more robust.
     // Kept short: the host's proxy drops requests with no response bytes
     // after ~30s, so total resolve time must stay well under that.
-    return await resolveYoutubeFallback(url);
+    const t1 = Date.now();
+    try {
+      const r = await resolveYoutubeFallback(url);
+      console.log(`[youtube] fallback ok in ${Date.now() - t1}ms`);
+      return r;
+    } catch (e2) {
+      console.error(`[youtube] fallback FAIL in ${Date.now() - t1}ms: ${(e2 as Error).message}`);
+      throw e2;
+    }
   }
 }
 
