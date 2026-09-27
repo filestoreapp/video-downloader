@@ -122,12 +122,37 @@ export function ffmpegBin(): string {
   return bin("ffmpeg");
 }
 
+/**
+ * Extra yt-dlp args enabling the bgutil Proof-of-Origin token provider
+ * (https://github.com/Brainicism/bgutil-ytdlp-pot-provider). The plugin
+ * mints PO tokens via a local node script so YouTube's web client stops
+ * answering "Sign in to confirm you're not a bot" for flagged datacenter
+ * IPs. Returns [] when the provider wasn't installed (postinstall skips it
+ * or the build predates it) — extraction then works exactly as before.
+ */
+export function ytDlpPotArgs(): string[] {
+  const pluginDir = path.join(process.cwd(), "pot-plugins");
+  const serverDir = path.join(process.cwd(), "pot-server");
+  if (
+    !fs.existsSync(path.join(pluginDir, "bgutil-ytdlp-pot-provider.zip")) ||
+    !fs.existsSync(path.join(serverDir, "build", "generate_once.js"))
+  ) {
+    return [];
+  }
+  return [
+    "--plugin-dirs",
+    pluginDir,
+    "--extractor-args",
+    `youtubepot-bgutilscript:server_home=${serverDir}`,
+  ];
+}
+
 async function ytdlpJson(url: string, timeoutMs = 25000): Promise<unknown> {
   let stdout: string;
   try {
     ({ stdout } = await execFileAsync(
       ytdlpBin(),
-      [...ytDlpCookieArgs(), "--no-download", "--no-warnings", "-j", url],
+      [...ytDlpCookieArgs(), ...ytDlpPotArgs(), "--no-download", "--no-warnings", "-j", url],
       { timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024 }
     ));
   } catch (err) {
@@ -313,7 +338,8 @@ interface YtDlpFormat {
 }
 
 async function resolveYoutubeFallback(url: string): Promise<ResolvedMedia> {
-  const data = (await ytdlpJson(url, 18000)) as {
+  // 60s: a cold PO-token mint can take up to ~20s on top of extraction.
+  const data = (await ytdlpJson(url, 60000)) as {
     title?: string;
     thumbnail?: string;
     duration?: number;

@@ -16,6 +16,7 @@ import path from "node:path";
 import {
   ffmpegBin,
   ytdlpBin,
+  ytDlpPotArgs,
   resolveForProcess,
   sanitizeFilename,
 } from "./video-extract";
@@ -170,6 +171,7 @@ export async function processMedia(p: ProcessParams): Promise<ProcessedFile> {
         ytdlpBin(),
         [
           ...ytDlpCookieArgs(),
+          ...ytDlpPotArgs(),
           "--no-warnings",
           "--download-sections",
           `*${Math.floor(start)}-${Math.ceil(end)}`,
@@ -237,6 +239,7 @@ export async function processMedia(p: ProcessParams): Promise<ProcessedFile> {
       ytdlpBin(),
       [
         ...ytDlpCookieArgs(),
+        ...ytDlpPotArgs(),
         "--no-warnings",
         "-f",
         "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b",

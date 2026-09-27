@@ -4,3 +4,5 @@ out/
 bin/
 *.tsbuildinfo
 .DS_Store
+pot-plugins/
+pot-server/
