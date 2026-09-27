@@ -35,6 +35,10 @@ export async function POST(req: Request) {
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Extraction failed. Please try again.";
     console.error(`[extract] FAIL :: ${url.slice(0, 80)} :: ${msg}`);
-    return NextResponse.json({ error: msg }, { status: 502 });
+    // NOTE: always 200, never 5xx — the host's proxy retries (or swallows)
+    // upstream 5xx responses, so the client would see a generic proxy 502
+    // instead of this message. The error rides in the body; page.tsx throws
+    // on data.error.
+    return NextResponse.json({ error: msg });
   }
 }

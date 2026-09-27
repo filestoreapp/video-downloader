@@ -152,7 +152,8 @@ export default function Home() {
         }
         throw new Error("The server is waking up. Please try again in a few seconds.");
       }
-      if (!res.ok) throw new Error(data.error || "Something went wrong.");
+      if (data.error) throw new Error(data.error);
+      if (!res.ok) throw new Error("Something went wrong.");
       return data as unknown as ExtractResult;
     }
     try {
