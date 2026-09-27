@@ -87,7 +87,16 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: url.trim() }),
       });
-      const data = await res.json();
+      // The host can briefly return an HTML error page (e.g. while the
+      // free-tier instance wakes from sleep). Parse defensively so the
+      // user gets a retry prompt, not a JSON syntax error.
+      const text = await res.text();
+      let data: { error?: string };
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error("The server is waking up. Please try again in a few seconds.");
+      }
       if (!res.ok) throw new Error(data.error || "Something went wrong.");
       setResult(data as ExtractResult);
     } catch (err) {
