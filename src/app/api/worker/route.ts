@@ -1,13 +1,18 @@
 import { NextResponse } from "next/server";
 import { runPscScrapeJob } from "@/lib/worker/psc-scrape";
+import { runNewsScrapeJob } from "@/lib/worker/news-scrape";
+import { createDraftPost, publishDraftPost, type WorkerCtx } from "@/lib/worker/digest-post";
 
 /**
  * Backend worker for the current-affairs site, hosted on this Koyeb service.
  *
  * POST /api/worker
  *   Authorization: Bearer <WORKER_SECRET>
- *   { "job": "publish-due-posts" | "publish-quiz" | "psc-scrape",
- *     "slug"?: string, "dry_run"?: boolean }
+ *   { "job": "publish-due-posts" | "publish-quiz" | "psc-scrape"
+ *     | "news-scrape" | "create-post" | "publish-post",
+ *     "slug"?: string, "dry_run"?: boolean,
+ *     // create-post only: title, excerpt, content_html, category_slug, tags
+ *   }
  *
  * Jobs replicate the site's own backend flows server-side (Supabase
  * service-role key bypasses RLS), so scheduled work no longer depends on
@@ -18,6 +23,12 @@ import { runPscScrapeJob } from "@/lib/worker/psc-scrape";
  *     + Telegram announcement.
  *   - psc-scrape: scrape keralapsc.gov.in listings, insert new PSC
  *     updates, announce each on Telegram.
+ *   - news-scrape: scrape Malayalam news portals for the daily digest
+ *     (returns headlines JSON; nothing is written).
+ *   - create-post: create a post as DRAFT (approval-gated daily digest).
+ *     Idempotent on slug — an existing slug is returned untouched.
+ *   - publish-post: publish a draft post by slug — generates the branded
+ *     thumbnail, flips to published, announces on Telegram.
  * After each job the worker asks the site to revalidate the affected
  * paths (its public pages are ISR-cached for 5 minutes).
  *
@@ -50,6 +61,19 @@ const REVALIDATE_SECRET = process.env.CA_REVALIDATE_SECRET || "";
 
 const CHANNEL_LINK = "https://t.me/Daily_CurrentAffairs_Malayalam";
 const CHANNEL_FOOTER = `\n\n📢 Join our channel: ${CHANNEL_LINK}`;
+
+/** Shared context for the digest-post jobs. */
+function ctx(): WorkerCtx {
+  return {
+    sbUrl: SB_URL,
+    sbKey: SB_KEY,
+    tgToken: TG_TOKEN,
+    tgChannel: TG_CHANNEL,
+    siteUrl: SITE_URL,
+    revalidateUrl: REVALIDATE_URL,
+    revalidateSecret: REVALIDATE_SECRET,
+  };
+}
 
 /** Escape text for Telegram's HTML parse mode (same as the site's esc()). */
 function esc(s: string): string {
@@ -312,8 +336,49 @@ export async function POST(req: Request) {
       );
       return NextResponse.json({ ok: true, job, dry_run: dryRun, ...r });
     }
+    if (job === "news-scrape") {
+      const r = await runNewsScrapeJob();
+      return NextResponse.json({ ok: true, job, ...r });
+    }
+    if (job === "create-post") {
+      const b = body as {
+        title?: unknown;
+        slug?: unknown;
+        excerpt?: unknown;
+        content_html?: unknown;
+        category_slug?: unknown;
+        tags?: unknown;
+      };
+      const title = String(b.title || "").trim();
+      const slug = String(b.slug || "").trim();
+      const content_html = String(b.content_html || "").trim();
+      if (!title || !slug || !content_html) {
+        return NextResponse.json(
+          { error: "title, slug, and content_html are required." },
+          { status: 400 }
+        );
+      }
+      const r = await createDraftPost(ctx(), {
+        title,
+        slug,
+        excerpt: String(b.excerpt || ""),
+        content_html,
+        category_slug: String(b.category_slug || "currentaffairs"),
+        tags: Array.isArray(b.tags) ? b.tags.map(String) : ["daily-digest"],
+      });
+      return NextResponse.json({ ok: true, job, ...r });
+    }
+    if (job === "publish-post") {
+      if (!TG_TOKEN) {
+        return NextResponse.json({ error: "Worker not configured (Telegram)." }, { status: 503 });
+      }
+      const slug = String(body.slug || "").trim();
+      if (!slug) return NextResponse.json({ error: "slug required." }, { status: 400 });
+      const r = await publishDraftPost(ctx(), slug);
+      return NextResponse.json({ ok: true, job, ...r });
+    }
     return NextResponse.json(
-      { error: "Unknown job. Use publish-due-posts, publish-quiz, or psc-scrape." },
+      { error: "Unknown job. Use publish-due-posts, publish-quiz, psc-scrape, news-scrape, create-post, or publish-post." },
       { status: 400 }
     );
   } catch (err) {
