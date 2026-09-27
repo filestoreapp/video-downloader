@@ -72,9 +72,28 @@ const TAB_META: Record<Tab, { icon: string; label: string }> = {
   clip: { icon: "✂️", label: "Cut clip" },
 };
 
+/** fetch with a hard timeout so a stalled request can never hang the UI. */
+async function fetchWithTimeout(input: RequestInfo, init: RequestInit, ms = 120000) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
+  try {
+    return await fetch(input, { ...init, signal: ctrl.signal });
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+function friendlyErr(err: unknown, fallback: string): string {
+  if (err instanceof DOMException && err.name === "AbortError") {
+    return "This is taking too long — the server may be waking up. Please try again.";
+  }
+  return err instanceof Error ? err.message : fallback;
+}
+
 export default function Home() {
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
+  const [loadingMsg, setLoadingMsg] = useState<"reading" | "waking">("reading");
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ExtractResult | null>(null);
   const [tab, setTab] = useState<Tab>("video");
@@ -106,8 +125,12 @@ export default function Home() {
     setClipStart("");
     setClipEnd("");
     setLoading(true);
+    setLoadingMsg("reading");
+    // If the free-tier instance is asleep, the first request wakes it
+    // (~40s). Tell the user what's happening instead of a dead spinner.
+    const wakeTimer = setTimeout(() => setLoadingMsg("waking"), 10000);
     try {
-      const res = await fetch("/api/dl/extract", {
+      const res = await fetchWithTimeout("/api/dl/extract", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: url.trim() }),
@@ -135,8 +158,9 @@ export default function Home() {
       setTab(first);
       setTimeout(() => resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong.");
+      setError(friendlyErr(err, "Something went wrong."));
     } finally {
+      clearTimeout(wakeTimer);
       setLoading(false);
     }
   }
@@ -148,8 +172,10 @@ export default function Home() {
     setProcError(null);
     setBusyId(opt.id);
     try {
-      const res = await fetch(
-        `/api/dl/fetch?u=${encodeURIComponent(opt.url)}&n=${encodeURIComponent(opt.filename)}`
+      const res = await fetchWithTimeout(
+        `/api/dl/fetch?u=${encodeURIComponent(opt.url)}&n=${encodeURIComponent(opt.filename)}`,
+        {},
+        300000
       );
       if (!res.ok) {
         const text = await res.text();
@@ -171,7 +197,7 @@ export default function Home() {
       a.remove();
       setTimeout(() => URL.revokeObjectURL(a.href), 5000);
     } catch (err) {
-      setProcError(err instanceof Error ? err.message : "Download failed.");
+      setProcError(friendlyErr(err, "Download failed."));
     } finally {
       setBusyId(null);
     }
@@ -183,17 +209,21 @@ export default function Home() {
     setProcError(null);
     setBusyId(opt.id + (start !== undefined ? "-clip" : ""));
     try {
-      const res = await fetch("/api/dl/process", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          url: url.trim(),
-          mode: opt.mode,
-          start,
-          end,
-          qualityHeight: opt.quality,
-        }),
-      });
+      const res = await fetchWithTimeout(
+        "/api/dl/process",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            url: url.trim(),
+            mode: opt.mode,
+            start,
+            end,
+            qualityHeight: opt.quality,
+          }),
+        },
+        600000
+      );
       if (!res.ok) {
         const text = await res.text();
         let msg = "Processing failed.";
@@ -214,7 +244,7 @@ export default function Home() {
       a.remove();
       setTimeout(() => URL.revokeObjectURL(a.href), 5000);
     } catch (err) {
-      setProcError(err instanceof Error ? err.message : "Processing failed.");
+      setProcError(friendlyErr(err, "Processing failed."));
     } finally {
       setBusyId(null);
     }
@@ -328,13 +358,20 @@ export default function Home() {
           <button type="submit" disabled={loading || !url.trim()} className="urlbar-go">
             {loading ? (
               <>
-                <span className="spinner" /> Reading…
+                <span className="spinner" />{" "}
+                {loadingMsg === "waking" ? "Waking up…" : "Reading…"}
               </>
             ) : (
               "Download"
             )}
           </button>
         </form>
+
+        {loading && loadingMsg === "waking" && (
+          <p className="wake-hint">
+            The free server sleeps when idle — waking it takes about 40 seconds. Hang on…
+          </p>
+        )}
 
         {error && (
           <div role="alert" className="alert error">

@@ -209,6 +209,14 @@ body {
   font-weight: 600;
 }
 
+.wake-hint {
+  margin: 14px auto 0;
+  max-width: 480px;
+  font-size: 13px;
+  color: #9ca3af;
+  line-height: 1.55;
+}
+
 .alert {
   margin: 20px auto 0;
   max-width: 560px;
