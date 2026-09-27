@@ -4,7 +4,6 @@ import {
   contentDisposition,
   type ProcessMode,
 } from "@/lib/media-process";
-import { recordDownload } from "@/lib/stats";
 
 export const dynamic = "force-dynamic";
 // Long enough for a 10-minute clip render; ignored on plain Node hosts.
@@ -46,8 +45,6 @@ export async function POST(req: Request) {
 
   try {
     const file = await processMedia({ url, mode, start, end });
-    // Count the completed render (fire-and-forget).
-    recordDownload(mode);
     // Wrap the stream so temp files are deleted once the body is consumed.
     const headers = new Headers({
       "Content-Type": file.contentType,

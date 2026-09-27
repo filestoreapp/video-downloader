@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { contentDisposition } from "@/lib/media-process";
-import { recordDownload } from "@/lib/stats";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -60,9 +59,6 @@ export async function GET(req: Request) {
   if (ct) headers.set("Content-Type", ct);
   const cl = upstream.headers.get("content-length");
   if (cl) headers.set("Content-Length", cl);
-
-  // Count the completed download (fire-and-forget; never blocks the stream).
-  recordDownload("video");
 
   return new Response(upstream.body, { headers });
 }

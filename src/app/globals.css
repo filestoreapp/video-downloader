@@ -212,18 +212,6 @@ body {
   line-height: 1.55;
 }
 
-.dl-count {
-  margin: 14px 0 0;
-  font-size: 13px;
-  color: #6b7280;
-  font-weight: 600;
-}
-
-.dl-count b {
-  color: #1a1d21;
-  font-weight: 800;
-}
-
 .alert {
   margin: 20px auto 0;
   max-width: 560px;

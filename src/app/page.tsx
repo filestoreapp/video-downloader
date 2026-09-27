@@ -101,20 +101,8 @@ export default function Home() {
   const [procError, setProcError] = useState<string | null>(null);
   const [clipStart, setClipStart] = useState("");
   const [clipEnd, setClipEnd] = useState("");
-  const [dlTotal, setDlTotal] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const resultRef = useRef<HTMLDivElement>(null);
-
-  // Download tracker: total completed downloads, shown as a pill.
-  // Hidden entirely when the counter backend isn't configured.
-  useEffect(() => {
-    fetch("/api/dl/stats")
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.enabled && typeof d.total === "number") setDlTotal(d.total);
-      })
-      .catch(() => {});
-  }, []);
 
   async function handlePaste() {
     try {
@@ -225,7 +213,6 @@ export default function Home() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-      setDlTotal((c) => (c === null ? c : c + 1));
     } catch (err) {
       setProcError(friendlyErr(err, "Download failed."));
     } finally {
@@ -272,7 +259,6 @@ export default function Home() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-      setDlTotal((c) => (c === null ? c : c + 1));
     } catch (err) {
       setProcError(friendlyErr(err, "Processing failed."));
     } finally {
@@ -409,11 +395,6 @@ export default function Home() {
           <span>🎞️ HD quality</span>
           <span>🚫 No watermark</span>
         </div>
-        {dlTotal !== null && (
-          <p className="dl-count">
-            📥 <b>{dlTotal.toLocaleString("en-IN")}</b> downloads so far
-          </p>
-        )}
       </section>
 
       {/* ---------- result ---------- */}
