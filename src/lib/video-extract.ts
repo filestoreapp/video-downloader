@@ -121,7 +121,7 @@ export function ffmpegBin(): string {
   return bin("ffmpeg");
 }
 
-async function ytdlpJson(url: string, timeoutMs = 30000): Promise<unknown> {
+async function ytdlpJson(url: string, timeoutMs = 25000): Promise<unknown> {
   let stdout: string;
   try {
     ({ stdout } = await execFileAsync(
@@ -192,7 +192,7 @@ async function resolveYoutubeFast(url: string): Promise<ResolvedMedia> {
           },
         },
       }),
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(8000),
     }
   );
   if (!res.ok) throw new Error("YouTube did not respond.");
@@ -253,7 +253,7 @@ interface YtDlpFormat {
 }
 
 async function resolveYoutubeFallback(url: string): Promise<ResolvedMedia> {
-  const data = (await ytdlpJson(url, 30000)) as {
+  const data = (await ytdlpJson(url, 18000)) as {
     title?: string;
     thumbnail?: string;
     duration?: number;
@@ -291,7 +291,7 @@ export async function resolveYoutube(url: string): Promise<ResolvedMedia> {
   } catch {
     // Fast path failed (e.g. network-level block) — yt-dlp is more robust.
     // Kept short: the host's proxy drops requests with no response bytes
-    // after ~55s, so total resolve time must stay well under that.
+    // after ~30s, so total resolve time must stay well under that.
     return await resolveYoutubeFallback(url);
   }
 }

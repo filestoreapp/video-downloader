@@ -129,7 +129,11 @@ export default function Home() {
     // If the free-tier instance is asleep, the first request wakes it
     // (~40s). Tell the user what's happening instead of a dead spinner.
     const wakeTimer = setTimeout(() => setLoadingMsg("waking"), 10000);
-    try {
+    // Marker for failures worth one automatic retry: the host's proxy
+    // answered instead of the app (plain "error code: 502"), which happens
+    // when YouTube/Instagram briefly throttles the server. Usually clears.
+    class TransientError extends Error {}
+    async function attemptExtract(): Promise<ExtractResult> {
       const res = await fetchWithTimeout("/api/dl/extract", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -143,10 +147,22 @@ export default function Home() {
       try {
         data = JSON.parse(text);
       } catch {
+        if (/^error code:\s*502/i.test(text.trim()) || res.status === 502 || res.status === 503) {
+          throw new TransientError("proxy");
+        }
         throw new Error("The server is waking up. Please try again in a few seconds.");
       }
       if (!res.ok) throw new Error(data.error || "Something went wrong.");
-      const r = data as unknown as ExtractResult;
+      return data as unknown as ExtractResult;
+    }
+    try {
+      let r: ExtractResult;
+      try {
+        r = await attemptExtract();
+      } catch (err) {
+        if (err instanceof TransientError) r = await attemptExtract();
+        else throw err;
+      }
       setResult(r);
       const first: Tab = r.options.some((o) => o.id.startsWith("video"))
         ? "video"
@@ -158,7 +174,7 @@ export default function Home() {
       setTab(first);
       setTimeout(() => resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
     } catch (err) {
-      setError(friendlyErr(err, "Something went wrong."));
+      setError(err instanceof TransientError ? "The source was slow to respond. Please try again." : friendlyErr(err, "Something went wrong."));
     } finally {
       clearTimeout(wakeTimer);
       setLoading(false);
