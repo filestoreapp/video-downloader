@@ -18,6 +18,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import fs from "node:fs";
 import path from "node:path";
+import { ytDlpCookieArgs, getYtCookieHeader, hasYtCookies } from "./yt-cookies";
 
 const execFileAsync = promisify(execFile);
 
@@ -126,7 +127,7 @@ async function ytdlpJson(url: string, timeoutMs = 25000): Promise<unknown> {
   try {
     ({ stdout } = await execFileAsync(
       ytdlpBin(),
-      ["--no-download", "--no-warnings", "-j", url],
+      [...ytDlpCookieArgs(), "--no-download", "--no-warnings", "-j", url],
       { timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024 }
     ));
   } catch (err) {
@@ -135,7 +136,11 @@ async function ytdlpJson(url: string, timeoutMs = 25000): Promise<unknown> {
     );
     console.error(`[ytdlp] FAIL :: ${msg.slice(0, 300).replace(/\n/g, " | ")}`);
     if (/registered users|login|cookies|private/i.test(msg)) {
-      throw new Error("This post is private or needs login. Only public posts work.");
+      throw new Error(
+        hasYtCookies()
+          ? "YouTube is still asking for a sign-in — the server's saved YouTube session has expired and needs refreshing."
+          : "This post is private or needs login. Only public posts work."
+      );
     }
     if (/unsupported url/i.test(msg)) {
       throw new Error("That link is not supported.");
@@ -203,6 +208,7 @@ async function resolveYoutubeFastWith(
 ): Promise<ResolvedMedia> {
   const videoId = extractYoutubeId(url);
   if (!videoId) throw new Error("Could not find a YouTube video ID in that link.");
+  const cookieHeader = getYtCookieHeader();
   const res = await fetch(
     `https://www.youtube.com/youtubei/v1/player?key=${YT_API_KEY}&prettyPrint=false`,
     {
@@ -210,6 +216,7 @@ async function resolveYoutubeFastWith(
       headers: {
         "Content-Type": "application/json",
         "User-Agent": client.userAgent,
+        ...(cookieHeader ? { Cookie: cookieHeader } : {}),
       },
       body: JSON.stringify({ videoId, context: { client: client.context } }),
       signal: AbortSignal.timeout(8000),
@@ -218,9 +225,14 @@ async function resolveYoutubeFastWith(
   if (!res.ok) throw new Error("YouTube did not respond.");
   const data = await res.json();
   if (data?.playabilityStatus?.status !== "OK") {
+    const reason = data?.playabilityStatus?.reason || "";
+    if (/not a bot|sign in/i.test(reason) && hasYtCookies()) {
+      throw new Error(
+        "YouTube is still asking for a sign-in — the server's saved YouTube session has expired and needs refreshing."
+      );
+    }
     throw new Error(
-      data?.playabilityStatus?.reason ||
-        "This video is private, deleted, or otherwise unavailable."
+      reason || "This video is private, deleted, or otherwise unavailable."
     );
   }
 

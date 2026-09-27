@@ -19,6 +19,7 @@ import {
   resolveForProcess,
   sanitizeFilename,
 } from "./video-extract";
+import { ytDlpCookieArgs } from "./yt-cookies";
 
 const execFileAsync = promisify(execFile);
 
@@ -168,6 +169,7 @@ export async function processMedia(p: ProcessParams): Promise<ProcessedFile> {
       await execFileAsync(
         ytdlpBin(),
         [
+          ...ytDlpCookieArgs(),
           "--no-warnings",
           "--download-sections",
           `*${Math.floor(start)}-${Math.ceil(end)}`,
@@ -234,6 +236,7 @@ export async function processMedia(p: ProcessParams): Promise<ProcessedFile> {
     await execFileAsync(
       ytdlpBin(),
       [
+        ...ytDlpCookieArgs(),
         "--no-warnings",
         "-f",
         "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b",
