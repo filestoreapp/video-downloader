@@ -63,15 +63,17 @@ export async function GET(req: Request) {
           [
             "--plugin-dirs", path.join(root, "pot-plugins"),
             "--extractor-args", `youtubepot-bgutilscript:server_home=${path.join(root, "pot-server")}`,
-            "--no-download", "--no-warnings", "-j", testUrl,
+            "--verbose", "--no-download", "--no-warnings", "-j", testUrl,
           ],
-          { timeout: 120000, maxBuffer: 32 * 1024 * 1024 }
+          { timeout: 150000, maxBuffer: 32 * 1024 * 1024 }
         );
         const line = stdout.split("\n").find((l) => l.trim().startsWith("{"));
         return line ? `OK title=${JSON.parse(line).title?.slice(0, 60)}` : "OK but no JSON";
       } catch (e) {
         const err = e as { stderr?: string; message?: string };
-        return `FAIL: ${String(err.stderr ?? err.message).slice(0, 1500).replace(/\n/g, " | ")}`;
+        const lines = String(err.stderr ?? err.message).split("\n");
+        const kept = lines.filter((l) => /pot|PO Token|provider|generate_once|node/i.test(l));
+        return `FAIL: kept=${JSON.stringify(kept.slice(0, 20))} tail=${lines.slice(-3).join(" | ").slice(0, 500)}`;
       }
     });
   }
