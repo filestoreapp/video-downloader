@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Video Downloader",
-  description: "Paste a YouTube or Instagram link, get the video file.",
+  title: "Media Downloader",
+  description: "Download YouTube videos & audio, Instagram reels & photos, and cut clips.",
   robots: { index: false, follow: false },
 };
 

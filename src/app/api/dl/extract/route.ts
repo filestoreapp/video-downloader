@@ -1,17 +1,15 @@
 import { NextResponse } from "next/server";
-import {
-  detectPlatform,
-  extractInstagram,
-  extractYoutube,
-} from "@/lib/video-extract";
+import { extractMedia } from "@/lib/video-extract";
 
 export const dynamic = "force-dynamic";
 
 /**
  * POST /api/dl/extract  { url }
- * Resolves a YouTube / Instagram link to a direct downloadable video URL.
- * The video bytes never pass through Vercel — the browser downloads
- * straight from the CDN (googlevideo / fbcdn).
+ * Resolves a YouTube / Instagram link into download options.
+ * `direct` options are CDN URLs — the browser downloads straight from the
+ * CDN (googlevideo / fbcdn), so no media bytes pass through the host.
+ * `server` options (MP3, clip, full-video fallback) are rendered by
+ * POST /api/dl/process on the host with ffmpeg / yt-dlp.
  */
 export async function POST(req: Request) {
   let url = "";
@@ -29,19 +27,8 @@ export async function POST(req: Request) {
     );
   }
 
-  const platform = detectPlatform(url);
-  if (!platform) {
-    return NextResponse.json(
-      { error: "Only YouTube and Instagram links are supported." },
-      { status: 400 }
-    );
-  }
-
   try {
-    const result =
-      platform === "youtube"
-        ? await extractYoutube(url)
-        : await extractInstagram(url);
+    const result = await extractMedia(url);
     return NextResponse.json(result);
   } catch (err) {
     return NextResponse.json(

@@ -157,3 +157,143 @@ body {
   color: #8e8e96;
   line-height: 1.65;
 }
+
+/* ---- all-in-one downloader sections ---- */
+
+.opt-section {
+  margin-top: 18px;
+}
+
+.opt-heading {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #8e8e96;
+  margin: 0 0 8px;
+}
+
+.opt-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.opt-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 13px 16px;
+  border-radius: 12px;
+  background: #1d1d26;
+  border: 1px solid #2e2e38;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.opt-btn:active {
+  background: #262630;
+}
+
+.opt-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.opt-btn .sub {
+  display: block;
+  font-size: 12px;
+  font-weight: 400;
+  color: #8e8e96;
+  margin-top: 2px;
+}
+
+.opt-btn .arrow {
+  color: #8e8e96;
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.opt-btn.primary {
+  background: #16a34a;
+  border-color: #16a34a;
+}
+
+.opt-btn.primary:active {
+  background: #15803d;
+}
+
+.opt-btn.primary .sub {
+  color: #d1fae5;
+}
+
+.opt-btn.primary .arrow {
+  color: #fff;
+}
+
+.clip-box {
+  background: #1d1d26;
+  border: 1px solid #2e2e38;
+  border-radius: 12px;
+  padding: 14px;
+}
+
+.clip-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.clip-input {
+  flex: 1;
+  min-width: 0;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid #3f3f46;
+  background: #14141b;
+  color: #fff;
+  font-size: 15px;
+  outline: none;
+  text-align: center;
+}
+
+.clip-input::placeholder {
+  color: #63636b;
+}
+
+.clip-sep {
+  color: #8e8e96;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.clip-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: #8e8e96;
+  line-height: 1.5;
+}
+
+.spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  vertical-align: -3px;
+  margin-right: 8px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
