@@ -1,1 +1,27 @@
-{"dependencies":{"next":"16.3.4","react":"19.2.8","react-dom":"19.2.8"},"devDependencies":{"@types/node":"^20","@types/react":"^19","@types/react-dom":"^19","typescript":"^5"},"name":"video-downloader","private":true,"scripts":{"build":"next build","dev":"next dev","postinstall":"node scripts/fetch-binaries.mjs","start":"next start"},"version":"1.0.0","engines":{"node":">=22"}}
+{
+  "dependencies": {
+    "cheerio": "^1.1.2",
+    "next": "16.3.4",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "sharp": "^0.35.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "typescript": "^5"
+  },
+  "name": "video-downloader",
+  "private": true,
+  "scripts": {
+    "build": "next build",
+    "dev": "next dev",
+    "postinstall": "node scripts/fetch-binaries.mjs",
+    "start": "next start"
+  },
+  "version": "1.0.0",
+  "engines": {
+    "node": ">=22"
+  }
+}

@@ -1,26 +1,36 @@
 import { NextResponse } from "next/server";
+import { runPscScrapeJob } from "@/lib/worker/psc-scrape";
 
 /**
  * Backend worker for the current-affairs site, hosted on this Koyeb service.
  *
  * POST /api/worker
  *   Authorization: Bearer <WORKER_SECRET>
- *   { "job": "publish-due-posts" | "publish-quiz", "slug"?: string, "dry_run"?: boolean }
+ *   { "job": "publish-due-posts" | "publish-quiz" | "psc-scrape",
+ *     "slug"?: string, "dry_run"?: boolean }
  *
- * Jobs replicate the site's own publish flows server-side (Supabase
- * service-role key bypasses RLS), so scheduled publishes no longer depend
- * on browser automation:
+ * Jobs replicate the site's own backend flows server-side (Supabase
+ * service-role key bypasses RLS), so scheduled work no longer depends on
+ * browser automation or Vercel serverless timeouts:
  *   - publish-due-posts: flip every due `scheduled` post to `published`
  *     (the daily district series) + Telegram announcement each.
  *   - publish-quiz: flip one draft quiz (mock test) to `published` by slug
  *     + Telegram announcement.
- * After each flip the worker asks the site to revalidate the affected
+ *   - psc-scrape: scrape keralapsc.gov.in listings, insert new PSC
+ *     updates, announce each on Telegram.
+ * After each job the worker asks the site to revalidate the affected
  * paths (its public pages are ISR-cached for 5 minutes).
+ *
+ * POST /api/worker/image (multipart: file, path, upsert)
+ *   Image pipeline for the site's admin uploads: sharp WebP compression
+ *   + upload to the GitHub images repo -> jsDelivr CDN URL. Keeps Vercel
+ *   free of sharp and the GitHub API round-trip.
  *
  * Env (all server-side, never exposed):
  *   WORKER_SECRET, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
  *   TELEGRAM_BOT_TOKEN, TELEGRAM_CHANNEL_ID (default @Daily_CurrentAffairs_Malayalam),
- *   CA_SITE_URL, CA_REVALIDATE_URL, CA_REVALIDATE_SECRET
+ *   CA_SITE_URL, CA_REVALIDATE_URL, CA_REVALIDATE_SECRET,
+ *   GITHUB_IMAGE_TOKEN (for /api/worker/image)
  */
 
 export const dynamic = "force-dynamic";
@@ -284,8 +294,26 @@ export async function POST(req: Request) {
       const r = await jobPublishQuiz(slug, dryRun);
       return NextResponse.json({ ok: true, job, dry_run: dryRun, ...r });
     }
+    if (job === "psc-scrape") {
+      if (!TG_TOKEN) {
+        return NextResponse.json({ error: "Worker not configured (Telegram)." }, { status: 503 });
+      }
+      const r = await runPscScrapeJob(
+        {
+          sbUrl: SB_URL,
+          sbKey: SB_KEY,
+          tgToken: TG_TOKEN,
+          tgChannel: TG_CHANNEL,
+          siteUrl: SITE_URL,
+          revalidateUrl: REVALIDATE_URL,
+          revalidateSecret: REVALIDATE_SECRET,
+        },
+        dryRun
+      );
+      return NextResponse.json({ ok: true, job, dry_run: dryRun, ...r });
+    }
     return NextResponse.json(
-      { error: "Unknown job. Use publish-due-posts or publish-quiz." },
+      { error: "Unknown job. Use publish-due-posts, publish-quiz, or psc-scrape." },
       { status: 400 }
     );
   } catch (err) {
