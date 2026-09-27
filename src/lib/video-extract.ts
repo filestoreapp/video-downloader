@@ -152,6 +152,12 @@ export function ytDlpPotArgs(): string[] {
     // gracefully and the next client is tried.
     "--extractor-args",
     "youtube:fetch_pot=always",
+    // Only "deno" is enabled as a JS runtime by default, and it isn't
+    // installed. Without a JS runtime yt-dlp falls back to the JSLESS client
+    // list (visionos only) — the web client is never tried, so the PO-token
+    // provider (web-family clients only) can never help. Enable node.
+    "--js-runtimes",
+    "node",
   ];
 }
 
