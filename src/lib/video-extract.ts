@@ -1,14 +1,8 @@
 /**
- * Server-side media extraction for the personal all-in-one downloader.
+ * Server-side media extraction for the personal Instagram downloader.
  *
- * YouTube: primary path is the pure-JS Innertube ANDROID player request,
- * which returns progressive (video+audio in one file) MP4 URLs plus
- * audio-only adaptive streams. If that fails, falls back to the yt-dlp
- * binary (audio direct URL; video merged server-side on demand).
- *
- * Instagram: extracted with the yt-dlp standalone binary (./bin/yt-dlp).
- * Handles reels/videos (progressive MP4), photo posts and carousels
- * (direct image URLs).
+ * Instagram reels, videos, photo posts and carousels are extracted with the
+ * yt-dlp standalone binary (./bin/yt-dlp).
  *
  * Direct CDN URLs go straight to the browser (zero host bandwidth).
  * Clips and MP3 conversions are rendered on the host with the ffmpeg
@@ -18,11 +12,10 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import fs from "node:fs";
 import path from "node:path";
-import { ytDlpCookieArgs, getYtCookieHeader, hasYtCookies } from "./yt-cookies";
 
 const execFileAsync = promisify(execFile);
 
-export type Platform = "youtube" | "instagram";
+export type Platform = "instagram";
 
 // A download option shown to the user.
 export interface DirectOption {
@@ -38,10 +31,8 @@ export interface ServerOption {
   id: string;
   label: string;
   sub?: string;
-  mode: "mp3" | "clip" | "fullvideo" | "hdvideo";
+  mode: "mp3" | "clip";
   needsTime: boolean;
-  /** requested video height for hdvideo mode (e.g. 720) */
-  quality?: number;
 }
 export type DlOption = DirectOption | ServerOption;
 
@@ -64,28 +55,8 @@ export interface ResolvedMedia {
   /** best direct video URL (progressive MP4), if available */
   videoUrl: string | null;
   videoLabel: string | null;
-  /** best direct audio-only URL, if available */
-  audioUrl: string | null;
-  /** video-only DASH MP4 streams (YouTube fast path), for HD muxing */
-  dashVideo: { url: string; height: number }[];
   /** original URL — needed for yt-dlp server-side modes */
   sourceUrl: string;
-  /** true when the YouTube fast path failed and yt-dlp must render video */
-  youtubeFallback: boolean;
-}
-
-export function detectPlatform(rawUrl: string): Platform | null {
-  const u = rawUrl.trim();
-  if (/(?:youtube\.com|youtu\.be)/i.test(u)) return "youtube";
-  if (/instagram\.com/i.test(u)) return "instagram";
-  return null;
-}
-
-export function extractYoutubeId(u: string): string | null {
-  const m = u.match(
-    /(?:youtube\.com\/(?:watch\?[^#]*v=|shorts\/|embed\/|live\/)|youtu\.be\/)([A-Za-z0-9_-]{11})/
-  );
-  return m ? m[1] : null;
 }
 
 export function extractInstagramShortcode(u: string): string | null {
@@ -122,58 +93,12 @@ export function ffmpegBin(): string {
   return bin("ffmpeg");
 }
 
-/**
- * Extra yt-dlp args enabling the bgutil Proof-of-Origin token provider
- * (https://github.com/Brainicism/bgutil-ytdlp-pot-provider). The plugin
- * mints PO tokens via a local node script so YouTube's web client stops
- * answering "Sign in to confirm you're not a bot" for flagged datacenter
- * IPs. Returns [] when the provider wasn't installed (postinstall skips it
- * or the build predates it) — extraction then works exactly as before.
- */
-export function ytDlpPotArgs(): string[] {
-  const pluginDir = path.join(process.cwd(), "pot-plugins");
-  const serverDir = path.join(process.cwd(), "pot-server");
-  if (
-    !fs.existsSync(path.join(pluginDir, "bgutil", "yt_dlp_plugins")) ||
-    !fs.existsSync(path.join(serverDir, "build", "generate_once.js"))
-  ) {
-    return [];
-  }
-  return [
-    "--plugin-dirs",
-    pluginDir,
-    "--extractor-args",
-    `youtubepot-bgutilscript:server_home=${serverDir}`,
-    // yt-dlp only consults PO-token providers when a token is "required" or
-    // "recommended" for the client (fetch_pot=auto, the default). The default
-    // player clients (visionos, web) have neither flag, so the provider sat
-    // idle and every walled video failed. "always" makes yt-dlp actually ask
-    // the provider for a token. Unsupported clients (visionos) are rejected
-    // gracefully and the next client is tried.
-    "--extractor-args",
-    "youtube:fetch_pot=always",
-    // Only "deno" is enabled as a JS runtime by default, and it isn't
-    // installed. Without a JS runtime yt-dlp falls back to the JSLESS client
-    // list (visionos only) — the web client is never tried, so the PO-token
-    // provider (web-family clients only) can never help. Enable node.
-    "--js-runtimes",
-    "node",
-    // Technique from miladateight/instagram-youtube-soundcloud-downloader:
-    // use the android_vr (Oculus Quest YouTube VR app) player client first.
-    // It doesn't require JS signature deciphering and uses a different API
-    // path that is less aggressively bot-walled than the web client.
-    // Falls back to web if android_vr fails.
-    "--extractor-args",
-    "youtube:player_client=android_vr,web",
-  ];
-}
-
 async function ytdlpJson(url: string, timeoutMs = 25000): Promise<unknown> {
   let stdout: string;
   try {
     ({ stdout } = await execFileAsync(
       ytdlpBin(),
-      [...ytDlpCookieArgs(), ...ytDlpPotArgs(), "--no-download", "--no-warnings", "-j", url],
+      ["--no-download", "--no-warnings", "-j", url],
       { timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024 }
     ));
   } catch (err) {
@@ -181,11 +106,9 @@ async function ytdlpJson(url: string, timeoutMs = 25000): Promise<unknown> {
       (err as { stderr?: unknown }).stderr ?? (err as Error).message ?? err
     );
     console.error(`[ytdlp] FAIL :: ${msg.slice(0, 300).replace(/\n/g, " | ")}`);
-    if (/registered users|login|cookies|private/i.test(msg)) {
+    if (/private|login|rate-limit|429/i.test(msg)) {
       throw new Error(
-        hasYtCookies()
-          ? "YouTube is still asking for a sign-in — the server's saved YouTube session has expired and needs refreshing."
-          : "This post is private or needs login. Only public posts work."
+        "This post is private or Instagram is throttling the server. Only public posts work — please try again in a bit."
       );
     }
     if (/unsupported url/i.test(msg)) {
@@ -196,226 +119,6 @@ async function ytdlpJson(url: string, timeoutMs = 25000): Promise<unknown> {
   const firstJson = stdout.split("\n").find((l) => l.trim().startsWith("{"));
   if (!firstJson) throw new Error("Could not read this link.");
   return JSON.parse(firstJson);
-}
-
-// ---------------------------------------------------------------------------
-// YouTube
-// ---------------------------------------------------------------------------
-
-const YT_API_KEY = "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8";
-const YT_ANDROID_VERSION = "20.10.38";
-
-interface YtFormat {
-  itag?: number;
-  url?: string;
-  mimeType?: string;
-  qualityLabel?: string;
-  bitrate?: number;
-  height?: number;
-}
-
-function dashHeight(f: YtFormat): number {
-  if (typeof f.height === "number" && f.height > 0) return f.height;
-  const m = /(\d{3,4})p/.exec(f.qualityLabel || "");
-  return m ? Number(m[1]) : 0;
-}
-
-const YT_CLIENTS = [
-  {
-    name: "ANDROID",
-    userAgent: `com.google.android.youtube/${YT_ANDROID_VERSION} (Linux; U; Android 14) gzip`,
-    context: {
-      clientName: "ANDROID",
-      clientVersion: YT_ANDROID_VERSION,
-      androidSdkVersion: 34,
-      hl: "en",
-      gl: "US",
-    },
-  },
-  {
-    name: "IOS",
-    userAgent: `com.google.ios.youtube/${YT_ANDROID_VERSION} (iPhone16,2; U; CPU iOS 17_7_1 like Mac OS X)`,
-    context: {
-      clientName: "IOS",
-      clientVersion: YT_ANDROID_VERSION,
-      deviceMake: "Apple",
-      deviceModel: "iPhone16,2",
-      osName: "iOS",
-      osVersion: "17.7.1",
-      hl: "en",
-      gl: "US",
-    },
-  },
-] as const;
-
-async function resolveYoutubeFastWith(
-  url: string,
-  client: (typeof YT_CLIENTS)[number]
-): Promise<ResolvedMedia> {
-  const videoId = extractYoutubeId(url);
-  if (!videoId) throw new Error("Could not find a YouTube video ID in that link.");
-  const cookieHeader = getYtCookieHeader();
-  const res = await fetch(
-    `https://www.youtube.com/youtubei/v1/player?key=${YT_API_KEY}&prettyPrint=false`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "User-Agent": client.userAgent,
-        ...(cookieHeader ? { Cookie: cookieHeader } : {}),
-      },
-      body: JSON.stringify({ videoId, context: { client: client.context } }),
-      signal: AbortSignal.timeout(8000),
-    }
-  );
-  if (!res.ok) throw new Error("YouTube did not respond.");
-  const data = await res.json();
-  if (data?.playabilityStatus?.status !== "OK") {
-    const reason = data?.playabilityStatus?.reason || "";
-    if (/not a bot|sign in/i.test(reason)) {
-      // The Innertube ANDROID/IOS clients are blocked from datacenter IPs
-      // even with valid cookies — this is expected, the yt-dlp fallback
-      // (web/android_vr + PO tokens) handles it. Do NOT claim the session
-      // expired here; cookie validity is proven by the fallback.
-      throw new Error("Innertube mobile client blocked from this server IP.");
-    }
-    throw new Error(
-      reason || "This video is private, deleted, or otherwise unavailable."
-    );
-  }
-
-  const progressive: YtFormat[] = (data?.streamingData?.formats ?? []).filter(
-    (f: YtFormat) => f.url
-  );
-  const adaptive: YtFormat[] = (data?.streamingData?.adaptiveFormats ?? []).filter(
-    (f: YtFormat) => f.url
-  );
-  const audio: YtFormat[] = adaptive.filter((f: YtFormat) =>
-    (f.mimeType || "").startsWith("audio/")
-  );
-  // Video-only DASH MP4 streams for the HD mux options.
-  const dashVideo = adaptive
-    .filter((f: YtFormat) => (f.mimeType || "").startsWith("video/mp4"))
-    .map((f) => ({ url: f.url as string, height: dashHeight(f) }))
-    .filter((v) => v.height > 0)
-    .sort((a, b) => b.height - a.height);
-  if (!progressive.length && !audio.length) {
-    throw new Error("No downloadable stream found for this video.");
-  }
-  progressive.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
-  audio.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
-
-  const details = data?.videoDetails ?? {};
-  const thumbs: { url: string }[] = details?.thumbnail?.thumbnails ?? [];
-  const title: string = details?.title || "youtube-video";
-  const duration = details?.lengthSeconds ? Number(details.lengthSeconds) : null;
-
-  return {
-    platform: "youtube",
-    title,
-    thumbnail: thumbs.length ? thumbs[thumbs.length - 1].url : null,
-    duration,
-    videoUrl: progressive.length ? (progressive[0].url as string) : null,
-    videoLabel: progressive.length ? progressive[0].qualityLabel || "Video" : null,
-    audioUrl: audio.length ? (audio[0].url as string) : null,
-    dashVideo,
-    sourceUrl: url,
-    youtubeFallback: false,
-  };
-}
-
-// Race a promise against a hard timeout. (AbortSignal.timeout only covers
-// the fetch headers — a server can send 200 OK and then stall the body
-// forever, hanging `res.json()`. This covers the whole attempt.)
-function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
-  let t: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>(
-    (_, rej) => (t = setTimeout(() => rej(new Error("timed out")), ms))
-  );
-  return Promise.race([p, timeout]).finally(() => clearTimeout(t));
-}
-
-// Race the ANDROID and IOS player clients: YouTube's bot check
-// ("Sign in to confirm you're not a bot") sometimes hits one client
-// but not the other. First success wins; each attempt is hard-capped
-// at 8s including the response body, so a stalled body can't hang us.
-async function resolveYoutubeFast(url: string): Promise<ResolvedMedia> {
-  const attempts = YT_CLIENTS.map((c) =>
-    withTimeout(resolveYoutubeFastWith(url, c), 8000)
-  );
-  try {
-    return await Promise.any(attempts);
-  } catch (e) {
-    // Promise.any aggregates; surface the first (ANDROID) error.
-    const errs = (e as AggregateError).errors as Error[];
-    throw errs[0] ?? new Error("YouTube did not respond.");
-  }
-}
-
-interface YtDlpFormat {
-  url?: string;
-  ext?: string;
-  vcodec?: string;
-  acodec?: string;
-  abr?: number;
-}
-
-async function resolveYoutubeFallback(url: string): Promise<ResolvedMedia> {
-  // 120s: a cold PO-token mint can take up to ~90s on throttled CPUs, on top
-  // of extraction. The plugin's own mint timeout was patched to 90s to match.
-  const data = (await ytdlpJson(url, 120000)) as {
-    title?: string;
-    thumbnail?: string;
-    duration?: number;
-    formats?: YtDlpFormat[];
-  };
-  const formats = data.formats ?? [];
-  const audio = formats.filter(
-    (f) =>
-      !!f.url &&
-      (f.vcodec === "none" || f.vcodec == null) &&
-      !!f.acodec &&
-      f.acodec !== "none"
-  );
-  audio.sort((a, b) => (b.abr || 0) - (a.abr || 0));
-  if (!formats.length) {
-    throw new Error("No downloadable stream found for this video.");
-  }
-  return {
-    platform: "youtube",
-    title: data.title || "youtube-video",
-    thumbnail: data.thumbnail || null,
-    duration: typeof data.duration === "number" ? data.duration : null,
-    videoUrl: null,
-    videoLabel: null,
-    audioUrl: audio.length ? (audio[0].url as string) : null,
-    dashVideo: [],
-    sourceUrl: url,
-    youtubeFallback: true,
-  };
-}
-
-export async function resolveYoutube(url: string): Promise<ResolvedMedia> {
-  const t0 = Date.now();
-  try {
-    const r = await resolveYoutubeFast(url);
-    console.log(`[youtube] fast ok in ${Date.now() - t0}ms`);
-    return r;
-  } catch (e) {
-    console.error(`[youtube] fast FAIL in ${Date.now() - t0}ms: ${(e as Error).message}`);
-    // Fast path failed (e.g. network-level block) — yt-dlp is more robust.
-    // Kept short: the host's proxy drops requests with no response bytes
-    // after ~30s, so total resolve time must stay well under that.
-    const t1 = Date.now();
-    try {
-      const r = await resolveYoutubeFallback(url);
-      console.log(`[youtube] fallback ok in ${Date.now() - t1}ms`);
-      return r;
-    } catch (e2) {
-      console.error(`[youtube] fallback FAIL in ${Date.now() - t1}ms: ${(e2 as Error).message}`);
-      throw e2;
-    }
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -482,70 +185,17 @@ function serverOption(
 }
 
 export async function extractMedia(url: string): Promise<ExtractOk> {
-  const platform = detectPlatform(url);
-  if (!platform) throw new Error("Only YouTube and Instagram links are supported.");
-
-  if (platform === "youtube") {
-    const m = await resolveYoutube(url);
-    const base = sanitizeFilename(m.title);
-    const options: DlOption[] = [];
-    if (m.videoUrl) {
-      const q = (m.videoLabel || "").trim();
-      options.push({
-        kind: "direct",
-        id: "video",
-        label: q && q !== "Video" ? `Video · ${q} MP4` : "Video · MP4",
-        sub: "saves to your device",
-        url: m.videoUrl,
-        filename: `${base}.mp4`,
-      });
-    } else {
-      options.push(
-        serverOption("video", "Video · MP4", "prepared on the server — takes a minute", "fullvideo")
-      );
+  const u = url.trim();
+  if (!/instagram\.com/i.test(u)) {
+    if (/(?:youtube\.com|youtu\.be)/i.test(u)) {
+      throw new Error("YouTube links are no longer supported — this site downloads Instagram only.");
     }
-    // HD qualities: mux the DASH video-only stream with audio server-side.
-    const hdHeights = [...new Set(m.dashVideo.map((v) => v.height))]
-      .filter((h) => h === 480 || h === 720 || h === 1080)
-      .sort((a, b) => b - a);
-    for (const h of hdHeights) {
-      options.push({
-        kind: "server",
-        id: `video-${h}p`,
-        label: `Video · ${h}p${h >= 720 ? " HD" : ""} MP4`,
-        sub: "best quality — prepared on the server",
-        mode: "hdvideo",
-        needsTime: false,
-        quality: h,
-      });
-    }
-    if (m.audioUrl) {
-      options.push({
-        kind: "direct",
-        id: "audio-m4a",
-        label: "Audio · M4A",
-        sub: "saves to your device",
-        url: m.audioUrl,
-        filename: `${base}.m4a`,
-      });
-    }
-    options.push(serverOption("audio-mp3", "Audio · MP3", "converted on the server", "mp3"));
-    options.push(serverOption("clip", "Cut a clip", "pick start & end times", "clip", true));
-    return {
-      ok: true,
-      platform,
-      title: m.title,
-      thumbnail: m.thumbnail,
-      duration: m.duration,
-      options,
-    };
+    throw new Error("Paste an Instagram link — a reel, video, or photo post.");
   }
-
-  // Instagram — a single yt-dlp call, then branch on the shape.
-  if (!extractInstagramShortcode(url)) {
+  if (!extractInstagramShortcode(u)) {
     throw new Error("Paste a link to a reel, video, or photo post.");
   }
-  const data = (await ytdlpJson(url)) as IgData;
+  const data = (await ytdlpJson(u)) as IgData;
   const title = data.title || "instagram-post";
   const fname = sanitizeFilename(title);
   const thumbnail = data.thumbnail || null;
@@ -570,14 +220,14 @@ export async function extractMedia(url: string): Promise<ExtractOk> {
         });
         return;
       }
-      for (const u of imageUrlsOf(e)) {
+      for (const img of imageUrlsOf(e)) {
         photos += 1;
         options.push({
           kind: "direct",
           id: `photo-${photos}`,
           label: `Photo ${photos}`,
           sub: "saves to your device",
-          url: u,
+          url: img,
           filename: `${fname}-photo${photos}.jpg`,
         });
       }
@@ -600,13 +250,13 @@ export async function extractMedia(url: string): Promise<ExtractOk> {
     } else {
       const imgs = imageUrlsOf(data);
       if (!imgs.length) throw new Error("No downloadable video or photo found in this post.");
-      imgs.forEach((u, i) => {
+      imgs.forEach((img, i) => {
         options.push({
           kind: "direct",
           id: `photo-${i}`,
           label: imgs.length > 1 ? `Photo ${i + 1}` : "Photo",
           sub: "saves to your device",
-          url: u,
+          url: img,
           filename: `${fname}-${i + 1}.jpg`,
         });
       });
@@ -614,7 +264,7 @@ export async function extractMedia(url: string): Promise<ExtractOk> {
     }
   }
 
-  return { ok: true, platform, title, thumbnail, duration, options };
+  return { ok: true, platform: "instagram", title, thumbnail, duration, options };
 }
 
 /**
@@ -622,8 +272,9 @@ export async function extractMedia(url: string): Promise<ExtractOk> {
  * stream URLs — always fetch fresh ones here.
  */
 export async function resolveForProcess(url: string): Promise<ResolvedMedia> {
-  const platform = detectPlatform(url);
-  if (platform === "youtube") return resolveYoutube(url);
+  if (!/instagram\.com/i.test(url)) {
+    throw new Error("Only Instagram links are supported.");
+  }
   if (!extractInstagramShortcode(url)) {
     throw new Error("Paste a link to a reel, video, or photo post.");
   }
@@ -637,9 +288,6 @@ export async function resolveForProcess(url: string): Promise<ResolvedMedia> {
     duration: typeof data.duration === "number" ? data.duration : null,
     videoUrl: v.url,
     videoLabel: v.label,
-    audioUrl: null,
-    dashVideo: [],
     sourceUrl: url,
-    youtubeFallback: false,
   };
 }

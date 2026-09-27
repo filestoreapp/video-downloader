@@ -15,7 +15,7 @@ interface ServerOption {
   id: string;
   label: string;
   sub?: string;
-  mode: "mp3" | "clip" | "fullvideo" | "hdvideo";
+  mode: "mp3" | "clip";
   needsTime: boolean;
   quality?: number;
 }
@@ -23,7 +23,7 @@ type DlOption = DirectOption | ServerOption;
 
 interface ExtractResult {
   ok: true;
-  platform: "youtube" | "instagram";
+  platform: "instagram";
   title: string;
   thumbnail: string | null;
   duration: number | null;
@@ -131,7 +131,7 @@ export default function Home() {
     const wakeTimer = setTimeout(() => setLoadingMsg("waking"), 10000);
     // Marker for failures worth one automatic retry: the host's proxy
     // answered instead of the app (plain "error code: 502"), which happens
-    // when YouTube/Instagram briefly throttles the server. Usually clears.
+    // when Instagram briefly throttles the server. Usually clears.
     class TransientError extends Error {}
     async function attemptExtract(): Promise<ExtractResult> {
       const res = await fetchWithTimeout("/api/dl/extract", {
@@ -236,7 +236,6 @@ export default function Home() {
             mode: opt.mode,
             start,
             end,
-            qualityHeight: opt.quality,
           }),
         },
         600000
@@ -332,7 +331,6 @@ export default function Home() {
             <span className="logo-badge">⬇</span> SnapDown
           </span>
           <div className="platform-chips">
-            <span className="pchip yt">▶ YouTube</span>
             <span className="pchip ig">◎ Instagram</span>
           </div>
         </div>
@@ -341,10 +339,10 @@ export default function Home() {
       {/* ---------- hero ---------- */}
       <section className="hero">
         <h1>
-          Download videos, music <span className="hl">&amp;</span> photos
+          Download Instagram reels, videos <span className="hl">&amp;</span> photos
         </h1>
         <p className="hero-sub">
-          Paste a YouTube or Instagram link below and grab it in seconds — free, no
+          Paste an Instagram link below and grab it in seconds — free, no
           sign-up, no watermark.
         </p>
 
@@ -359,7 +357,7 @@ export default function Home() {
             type="url"
             inputMode="url"
             autoComplete="off"
-            placeholder="Paste a YouTube or Instagram link…"
+            placeholder="Paste an Instagram link…"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
           />
@@ -538,8 +536,8 @@ export default function Home() {
         <h2>Everything in one place</h2>
         <div className="tools-grid">
           {[
-            { icon: "🎬", t: "Video downloader", d: "Save YouTube videos and Instagram reels in HD MP4." },
-            { icon: "🎵", t: "MP3 converter", d: "Pull just the audio from any video as an MP3." },
+            { icon: "🎬", t: "Reel downloader", d: "Save Instagram reels and videos in MP4." },
+            { icon: "🎵", t: "MP3 converter", d: "Pull just the audio from any reel as an MP3." },
             { icon: "🖼️", t: "Photo saver", d: "Download full-size photos from Instagram posts." },
             { icon: "✂️", t: "Clip cutter", d: "Cut any moment — 2:03 to 2:40 — and download it." },
           ].map((c) => (
@@ -557,7 +555,7 @@ export default function Home() {
         <h2>How it works</h2>
         <div className="steps">
           {[
-            { n: "1", t: "Paste the link", d: "Copy a YouTube or Instagram link and paste it above." },
+            { n: "1", t: "Paste the link", d: "Copy an Instagram link and paste it above." },
             { n: "2", t: "Pick a format", d: "Choose video, audio, photos — or cut a clip by time." },
             { n: "3", t: "Download", d: "Your file starts downloading instantly. That's it." },
           ].map((s) => (
@@ -583,15 +581,15 @@ export default function Home() {
             },
             {
               q: "Which links are supported?",
-              a: "Public YouTube videos and public Instagram reels, videos and photo posts. Private posts, stories and profile photos are not supported.",
+              a: "Public Instagram reels, videos and photo posts. Private posts, stories and profile photos are not supported.",
             },
             {
               q: "Where do the files go when I tap download?",
               a: "Straight to your device — everything downloads inside this page. Nothing opens in a new tab or another site.",
             },
             {
-              q: "Why do HD videos take longer?",
-              a: "The instant 360p video comes straight from the source. HD qualities (480p/720p/1080p), MP3s and clips are prepared on our server first, which takes a little longer.",
+              q: "Why do MP3s and clips take longer?",
+              a: "Videos and photos download instantly. MP3s and clips are prepared on our server first, which takes a little longer.",
             },
             {
               q: "The first visit took a while to load. Why?",

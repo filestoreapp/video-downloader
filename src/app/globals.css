@@ -84,11 +84,6 @@ body {
   color: #4b5563;
 }
 
-.pchip.yt {
-  background: #fdeceb;
-  color: #c81e1e;
-}
-
 .pchip.ig {
   background: #f3e8ff;
   color: #7e22ce;
@@ -282,11 +277,6 @@ body {
   padding: 5px 12px;
   border-radius: 999px;
   text-transform: capitalize;
-}
-
-.badge.youtube {
-  background: #fdeceb;
-  color: #c81e1e;
 }
 
 .badge.instagram {

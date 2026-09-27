@@ -5,11 +5,11 @@ export const dynamic = "force-dynamic";
 
 /**
  * POST /api/dl/extract  { url }
- * Resolves a YouTube / Instagram link into download options.
+ * Resolves an Instagram link into download options.
  * `direct` options are CDN URLs — the browser downloads straight from the
- * CDN (googlevideo / fbcdn), so no media bytes pass through the host.
- * `server` options (MP3, clip, full-video fallback) are rendered by
- * POST /api/dl/process on the host with ffmpeg / yt-dlp.
+ * CDN (fbcdn), so no media bytes pass through the host.
+ * `server` options (MP3, clip) are rendered by POST /api/dl/process
+ * on the host with ffmpeg / yt-dlp.
  */
 export async function POST(req: Request) {
   let url = "";
@@ -22,7 +22,7 @@ export async function POST(req: Request) {
 
   if (!url || !/^https?:\/\//i.test(url)) {
     return NextResponse.json(
-      { error: "Paste a YouTube or Instagram link first." },
+      { error: "Paste an Instagram link first." },
       { status: 400 }
     );
   }

@@ -6,7 +6,7 @@ export const maxDuration = 300;
 
 /**
  * GET /api/dl/fetch?u=<cdn-url>&n=<filename>
- * Streams a source-CDN file (googlevideo / fbcdn / cdninstagram) through
+ * Streams a source-CDN file (fbcdn / cdninstagram) through
  * the host with Content-Disposition: attachment, so the browser downloads
  * it in-app instead of opening the CDN URL in a new tab.
  *
@@ -14,7 +14,6 @@ export const maxDuration = 300;
  * allowed, https only, no credentials in the URL.
  */
 const ALLOWED_HOSTS = [
-  /(^|\.)googlevideo\.com$/i,
   /(^|\.)fbcdn\.net$/i,
   /(^|\.)cdninstagram\.com$/i,
 ];

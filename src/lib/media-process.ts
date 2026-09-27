@@ -1,38 +1,24 @@
 /**
- * Server-side media processing: clip cutting, MP3 conversion, and the
- * YouTube full-video fallback (yt-dlp merge). Runs on the host with the
- * ffmpeg static binary (./bin/ffmpeg).
+ * Server-side media processing: clip cutting and MP3 conversion.
+ * Runs on the host with the ffmpeg static binary (./bin/ffmpeg).
  *
- * Small jobs (clip/mp3) stream straight from ffmpeg's stdout — no temp
- * files. The yt-dlp merge fallback writes one temp file, streams it,
- * then deletes it.
+ * Jobs stream straight from ffmpeg's stdout — no temp files.
  */
-import { spawn, execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { spawn } from "node:child_process";
 import { Readable } from "node:stream";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import {
   ffmpegBin,
-  ytdlpBin,
-  ytDlpPotArgs,
   resolveForProcess,
   sanitizeFilename,
 } from "./video-extract";
-import { ytDlpCookieArgs } from "./yt-cookies";
 
-const execFileAsync = promisify(execFile);
-
-export type ProcessMode = "mp3" | "clip" | "fullvideo" | "hdvideo";
+export type ProcessMode = "mp3" | "clip";
 
 export interface ProcessParams {
   url: string;
   mode: ProcessMode;
   start?: number;
   end?: number;
-  /** requested video height for hdvideo mode */
-  qualityHeight?: number;
 }
 
 export interface ProcessedFile {
@@ -91,8 +77,8 @@ export async function processMedia(p: ProcessParams): Promise<ProcessedFile> {
   const base = sanitizeFilename(media.title);
 
   if (p.mode === "mp3") {
-    // Audio source: dedicated audio stream, else the video's own audio.
-    const src = media.audioUrl ?? media.videoUrl;
+    // Instagram videos always have a combined video+audio stream.
+    const src = media.videoUrl;
     if (!src) throw new Error("No audio found for this link.");
     const { webStream } = runStreaming(ffmpegBin(), [
       "-hide_banner",
@@ -129,138 +115,42 @@ export async function processMedia(p: ProcessParams): Promise<ProcessedFile> {
     if (media.duration && end > media.duration + 1) {
       throw new Error(`This video is only ${Math.round(media.duration)}s long.`);
     }
+    if (!media.videoUrl) throw new Error("No video found for this link.");
 
-    // Fast path: direct video URL + ffmpeg seek (no re-encode, near instant).
-    if (media.videoUrl && !media.youtubeFallback) {
-      // Seek to ~5s before the cut point first (fast keyframe seek), then
-      // trim precisely with stream copy. Fragmented MP4 so stdout piping works.
-      const pre = Math.max(0, start - 5);
-      const { webStream } = runStreaming(ffmpegBin(), [
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-ss",
-        String(pre),
-        "-i",
-        media.videoUrl,
-        "-ss",
-        String(start - pre),
-        "-t",
-        String(len),
-        "-c",
-        "copy",
-        "-avoid_negative_ts",
-        "make_zero",
-        "-movflags",
-        "frag_keyframe+empty_moov",
-        "-f",
-        "mp4",
-        "pipe:1",
-      ]);
-      return {
-        body: webStream,
-        contentType: "video/mp4",
-        filename: `${base}-clip-${Math.round(start)}s-${Math.round(end)}s.mp4`,
-      };
-    }
-
-    // Fallback path: yt-dlp downloads the section and cuts it.
-    const tmp = path.join(os.tmpdir(), `clip-${Date.now()}-${Math.random().toString(36).slice(2)}.mp4`);
-    try {
-      await execFileAsync(
-        ytdlpBin(),
-        [
-          ...ytDlpCookieArgs(),
-          ...ytDlpPotArgs(),
-          "--no-warnings",
-          "--download-sections",
-          `*${Math.floor(start)}-${Math.ceil(end)}`,
-          "--force-keyframes-at-cuts",
-          "-f",
-          "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b",
-          "--merge-output-format",
-          "mp4",
-          "-o",
-          tmp,
-          media.sourceUrl,
-        ],
-        { timeout: JOB_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 }
-      );
-    } catch (err) {
-      fs.rmSync(tmp, { force: true });
-      throw new Error("Could not cut this clip. Please try again.");
-    }
-    return {
-      body: Readable.toWeb(fs.createReadStream(tmp)) as ReadableStream<Uint8Array>,
-      contentType: "video/mp4",
-      filename: `${base}-clip-${Math.round(start)}s-${Math.round(end)}s.mp4`,
-      cleanup: () => fs.rmSync(tmp, { force: true }),
-    };
-  }
-
-  // p.mode === "hdvideo" — mux the DASH video-only stream at the requested
-  // quality with the best audio stream. Stream copy, so it's fast.
-  if (p.mode === "hdvideo") {
-    const want = p.qualityHeight || 720;
-    const cands = [...media.dashVideo]
-      .filter((v) => v.height <= want)
-      .sort((a, b) => b.height - a.height);
-    const video = cands[0] ?? [...media.dashVideo].sort((a, b) => b.height - a.height)[0];
-    if (!video) throw new Error("This quality is not available for this video.");
-    const args = [
+    // Direct video URL + ffmpeg seek (no re-encode, near instant).
+    // Seek to ~5s before the cut point first (fast keyframe seek), then
+    // trim precisely with stream copy. Fragmented MP4 so stdout piping works.
+    const pre = Math.max(0, start - 5);
+    const { webStream } = runStreaming(ffmpegBin(), [
       "-hide_banner",
       "-loglevel",
       "error",
+      "-ss",
+      String(pre),
       "-i",
-      video.url,
-    ];
-    if (media.audioUrl) args.push("-i", media.audioUrl);
-    args.push(
+      media.videoUrl,
+      "-ss",
+      String(start - pre),
+      "-t",
+      String(len),
       "-c",
       "copy",
+      "-avoid_negative_ts",
+      "make_zero",
       "-movflags",
       "frag_keyframe+empty_moov",
       "-f",
       "mp4",
-      "pipe:1"
-    );
-    const { webStream } = runStreaming(ffmpegBin(), args);
+      "pipe:1",
+    ]);
     return {
       body: webStream,
       contentType: "video/mp4",
-      filename: `${base}-${video.height}p.mp4`,
+      filename: `${base}-clip-${Math.round(start)}s-${Math.round(end)}s.mp4`,
     };
   }
 
-  // p.mode === "fullvideo" — YouTube fallback: merge best streams server-side.
-  const tmp = path.join(os.tmpdir(), `full-${Date.now()}-${Math.random().toString(36).slice(2)}.mp4`);
-  try {
-    await execFileAsync(
-      ytdlpBin(),
-      [
-        ...ytDlpCookieArgs(),
-        ...ytDlpPotArgs(),
-        "--no-warnings",
-        "-f",
-        "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b",
-        "--merge-output-format",
-        "mp4",
-        "-o",
-        tmp,
-        media.sourceUrl,
-      ],
-      { timeout: JOB_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 }
-    );
-  } catch {
-    fs.rmSync(tmp, { force: true });
-    throw new Error("Could not prepare this video. Please try again.");
-  }
-  return {
-    body: Readable.toWeb(fs.createReadStream(tmp)) as ReadableStream<Uint8Array>,
-    contentType: "video/mp4",
-    filename: `${base}.mp4`,
-    cleanup: () => fs.rmSync(tmp, { force: true }),
-  };
+  throw new Error("Unsupported processing mode.");
 }
 
 export { contentDisposition };
