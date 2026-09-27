@@ -134,7 +134,7 @@ export function ytDlpPotArgs(): string[] {
   const pluginDir = path.join(process.cwd(), "pot-plugins");
   const serverDir = path.join(process.cwd(), "pot-server");
   if (
-    !fs.existsSync(path.join(pluginDir, "bgutil-ytdlp-pot-provider.zip")) ||
+    !fs.existsSync(path.join(pluginDir, "bgutil", "yt_dlp_plugins")) ||
     !fs.existsSync(path.join(serverDir, "build", "generate_once.js"))
   ) {
     return [];
@@ -338,8 +338,9 @@ interface YtDlpFormat {
 }
 
 async function resolveYoutubeFallback(url: string): Promise<ResolvedMedia> {
-  // 60s: a cold PO-token mint can take up to ~20s on top of extraction.
-  const data = (await ytdlpJson(url, 60000)) as {
+  // 120s: a cold PO-token mint can take up to ~90s on throttled CPUs, on top
+  // of extraction. The plugin's own mint timeout was patched to 90s to match.
+  const data = (await ytdlpJson(url, 120000)) as {
     title?: string;
     thumbnail?: string;
     duration?: number;

@@ -138,7 +138,7 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: url.trim() }),
-      });
+      }, 180000); // cold PO-token mint can take ~90s on top of extraction
       // The host can briefly return an HTML error page (e.g. while the
       // free-tier instance wakes from sleep). Parse defensively so the
       // user gets a retry prompt, not a JSON syntax error.
