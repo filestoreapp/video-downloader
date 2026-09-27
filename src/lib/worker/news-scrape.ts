@@ -62,8 +62,8 @@ async function scrapeHtmlSource(src: Source): Promise<NewsItem[]> {
   $(src.headingSelector || "h1, h2, h3").each((_, el) => {
     const h = $(el);
     const title = cleanTitle(h.text());
-    let a = h.find("a").first();
-    if (!a.length) a = h.closest("a");
+    const inner = h.find("a").first();
+    const a = inner.length ? inner : h.closest("a");
     let href = (a.attr("href") || "").trim();
     if (title.length < 25 || title.length > 220) return;
     if (!href || href.startsWith("#") || href.startsWith("javascript:")) return;
