@@ -272,10 +272,12 @@ async function resolveYoutubeFastWith(
   const data = await res.json();
   if (data?.playabilityStatus?.status !== "OK") {
     const reason = data?.playabilityStatus?.reason || "";
-    if (/not a bot|sign in/i.test(reason) && hasYtCookies()) {
-      throw new Error(
-        "YouTube is still asking for a sign-in — the server's saved YouTube session has expired and needs refreshing."
-      );
+    if (/not a bot|sign in/i.test(reason)) {
+      // The Innertube ANDROID/IOS clients are blocked from datacenter IPs
+      // even with valid cookies — this is expected, the yt-dlp fallback
+      // (web/android_vr + PO tokens) handles it. Do NOT claim the session
+      // expired here; cookie validity is proven by the fallback.
+      throw new Error("Innertube mobile client blocked from this server IP.");
     }
     throw new Error(
       reason || "This video is private, deleted, or otherwise unavailable."
