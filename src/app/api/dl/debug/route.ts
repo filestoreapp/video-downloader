@@ -87,8 +87,9 @@ export async function GET(req: Request) {
       } catch (e) {
         const err = e as { stderr?: string; message?: string };
         const lines = String(err.stderr ?? err.message).split("\n");
-        const kept = lines.filter((l) => /pot|PO Token|provider|generate_once|node|fetch_pot|Fetching|token/i.test(l));
-        return `FAIL: args=${JSON.stringify(ytDlpPotArgs())} kept=${JSON.stringify(kept.slice(0, 25))} tail=${lines.slice(-3).join(" | ").slice(0, 500)}`;
+        // Return full stderr (base64 to preserve formatting), up to 30KB
+        const full = String(err.stderr ?? err.message).slice(0, 30000);
+        return `FAIL: args=${JSON.stringify(ytDlpPotArgs())} FULL_STDERR_BASE64=${Buffer.from(full).toString("base64").slice(0, 40000)}`;
       }
     });
   }
