@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 interface DirectOption {
   kind: "direct";
@@ -101,8 +101,20 @@ export default function Home() {
   const [procError, setProcError] = useState<string | null>(null);
   const [clipStart, setClipStart] = useState("");
   const [clipEnd, setClipEnd] = useState("");
+  const [dlTotal, setDlTotal] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const resultRef = useRef<HTMLDivElement>(null);
+
+  // Download tracker: total completed downloads, shown as a pill.
+  // Hidden entirely when the counter backend isn't configured.
+  useEffect(() => {
+    fetch("/api/dl/stats")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.enabled && typeof d.total === "number") setDlTotal(d.total);
+      })
+      .catch(() => {});
+  }, []);
 
   async function handlePaste() {
     try {
@@ -213,6 +225,7 @@ export default function Home() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      setDlTotal((c) => (c === null ? c : c + 1));
     } catch (err) {
       setProcError(friendlyErr(err, "Download failed."));
     } finally {
@@ -259,6 +272,7 @@ export default function Home() {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      setDlTotal((c) => (c === null ? c : c + 1));
     } catch (err) {
       setProcError(friendlyErr(err, "Processing failed."));
     } finally {
@@ -382,11 +396,7 @@ export default function Home() {
           </button>
         </form>
 
-        {loading && loadingMsg === "waking" && (
-          <p className="wake-hint">
-            The free server sleeps when idle — waking it takes about 40 seconds. Hang on…
-          </p>
-        )}
+        {loading && <LoadingCard waking={loadingMsg === "waking"} />}
 
         {error && (
           <div role="alert" className="alert error">
@@ -399,6 +409,11 @@ export default function Home() {
           <span>🎞️ HD quality</span>
           <span>🚫 No watermark</span>
         </div>
+        {dlTotal !== null && (
+          <p className="dl-count">
+            📥 <b>{dlTotal.toLocaleString("en-IN")}</b> downloads so far
+          </p>
+        )}
       </section>
 
       {/* ---------- result ---------- */}
@@ -610,6 +625,35 @@ export default function Home() {
           is not supported.
         </p>
       </footer>
+    </div>
+  );
+}
+
+/** Animated loading state shown while the link is being resolved. */
+function LoadingCard({ waking }: { waking: boolean }) {
+  const steps = ["Fetching media…", "Reading video info…", "Preparing download options…"];
+  const [step, setStep] = useState(0);
+  useEffect(() => {
+    if (waking) return;
+    const t = setInterval(() => setStep((s) => (s + 1) % steps.length), 2200);
+    return () => clearInterval(t);
+  }, [waking, steps.length]);
+  return (
+    <div className="loading-card" aria-live="polite" aria-busy="true">
+      <div className="load-visual">
+        <span className="load-ring" />
+        <span className="load-ring r2" />
+        <span className="load-arrow">⬇</span>
+      </div>
+      <p className="load-msg">{waking ? "Waking up the server…" : steps[step]}</p>
+      <div className="load-bar">
+        <span />
+      </div>
+      {waking && (
+        <p className="wake-hint">
+          The free server sleeps when idle — waking it takes about 40 seconds. Hang on…
+        </p>
+      )}
     </div>
   );
 }
