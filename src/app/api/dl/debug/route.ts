@@ -8,7 +8,8 @@ const execFileAsync = promisify(execFile);
 
 // Temporary diagnostics for the PO-token rollout. Reports whether the
 // postinstall artifacts exist and how the plugin probe behaves.
-export async function GET() {
+// ?url=<video-url> runs the exact yt-dlp fallback command and returns stderr.
+export async function GET(req: Request) {
   const root = process.cwd();
   const out: Record<string, unknown> = { root, node: process.version };
   const t = async (label: string, fn: () => Promise<unknown>) => {
@@ -53,5 +54,26 @@ export async function GET() {
     const potLines = (stdout + stderr).split("\n").filter((l) => /pot/i.test(l)).slice(0, 6);
     return potLines;
   });
+  const testUrl = new URL(req.url).searchParams.get("url");
+  if (testUrl && /^https?:\/\//.test(testUrl)) {
+    await t("extract_stderr", async () => {
+      try {
+        const { stdout } = await execFileAsync(
+          bin,
+          [
+            "--plugin-dirs", path.join(root, "pot-plugins"),
+            "--extractor-args", `youtubepot-bgutilscript:server_home=${path.join(root, "pot-server")}`,
+            "--no-download", "--no-warnings", "-j", testUrl,
+          ],
+          { timeout: 120000, maxBuffer: 32 * 1024 * 1024 }
+        );
+        const line = stdout.split("\n").find((l) => l.trim().startsWith("{"));
+        return line ? `OK title=${JSON.parse(line).title?.slice(0, 60)}` : "OK but no JSON";
+      } catch (e) {
+        const err = e as { stderr?: string; message?: string };
+        return `FAIL: ${String(err.stderr ?? err.message).slice(0, 1500).replace(/\n/g, " | ")}`;
+      }
+    });
+  }
   return NextResponse.json(out);
 }
