@@ -158,6 +158,13 @@ export function ytDlpPotArgs(): string[] {
     // provider (web-family clients only) can never help. Enable node.
     "--js-runtimes",
     "node",
+    // Technique from miladateight/instagram-youtube-soundcloud-downloader:
+    // use the android_vr (Oculus Quest YouTube VR app) player client first.
+    // It doesn't require JS signature deciphering and uses a different API
+    // path that is less aggressively bot-walled than the web client.
+    // Falls back to web if android_vr fails.
+    "--extractor-args",
+    "youtube:player_client=android_vr,web",
   ];
 }
 
