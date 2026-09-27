@@ -169,30 +169,49 @@ function dashHeight(f: YtFormat): number {
   return m ? Number(m[1]) : 0;
 }
 
-async function resolveYoutubeFast(url: string): Promise<ResolvedMedia> {
+const YT_CLIENTS = [
+  {
+    name: "ANDROID",
+    userAgent: `com.google.android.youtube/${YT_ANDROID_VERSION} (Linux; U; Android 14) gzip`,
+    context: {
+      clientName: "ANDROID",
+      clientVersion: YT_ANDROID_VERSION,
+      androidSdkVersion: 34,
+      hl: "en",
+      gl: "US",
+    },
+  },
+  {
+    name: "IOS",
+    userAgent: `com.google.ios.youtube/${YT_ANDROID_VERSION} (iPhone16,2; U; CPU iOS 17_7_1 like Mac OS X)`,
+    context: {
+      clientName: "IOS",
+      clientVersion: YT_ANDROID_VERSION,
+      deviceMake: "Apple",
+      deviceModel: "iPhone16,2",
+      osName: "iOS",
+      osVersion: "17.7.1",
+      hl: "en",
+      gl: "US",
+    },
+  },
+] as const;
+
+async function resolveYoutubeFastWith(
+  url: string,
+  client: (typeof YT_CLIENTS)[number]
+): Promise<ResolvedMedia> {
   const videoId = extractYoutubeId(url);
   if (!videoId) throw new Error("Could not find a YouTube video ID in that link.");
-
   const res = await fetch(
     `https://www.youtube.com/youtubei/v1/player?key=${YT_API_KEY}&prettyPrint=false`,
     {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "User-Agent": `com.google.android.youtube/${YT_ANDROID_VERSION} (Linux; U; Android 14) gzip`,
+        "User-Agent": client.userAgent,
       },
-      body: JSON.stringify({
-        videoId,
-        context: {
-          client: {
-            clientName: "ANDROID",
-            clientVersion: YT_ANDROID_VERSION,
-            androidSdkVersion: 34,
-            hl: "en",
-            gl: "US",
-          },
-        },
-      }),
+      body: JSON.stringify({ videoId, context: { client: client.context } }),
       signal: AbortSignal.timeout(8000),
     }
   );
@@ -243,6 +262,20 @@ async function resolveYoutubeFast(url: string): Promise<ResolvedMedia> {
     sourceUrl: url,
     youtubeFallback: false,
   };
+}
+
+// Race the ANDROID and IOS player clients: YouTube's bot check
+// ("Sign in to confirm you're not a bot") sometimes hits one client
+// but not the other. First success wins; both hang → 8s total, not 16s.
+async function resolveYoutubeFast(url: string): Promise<ResolvedMedia> {
+  const attempts = YT_CLIENTS.map((c) => resolveYoutubeFastWith(url, c));
+  try {
+    return await Promise.any(attempts);
+  } catch (e) {
+    // Promise.any aggregates; surface the first (ANDROID) error.
+    const errs = (e as AggregateError).errors as Error[];
+    throw errs[0] ?? new Error("YouTube did not respond.");
+  }
 }
 
 interface YtDlpFormat {
