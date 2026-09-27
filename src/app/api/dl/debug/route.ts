@@ -3,6 +3,7 @@ import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
+import { ytDlpPotArgs } from "@/lib/video-extract";
 
 const execFileAsync = promisify(execFile);
 
@@ -76,8 +77,7 @@ export async function GET(req: Request) {
         const { stdout } = await execFileAsync(
           bin,
           [
-            "--plugin-dirs", path.join(root, "pot-plugins"),
-            "--extractor-args", `youtubepot-bgutilscript:server_home=${path.join(root, "pot-server")}`,
+            ...ytDlpPotArgs(),
             "--verbose", "--no-download", "--no-warnings", "-j", testUrl,
           ],
           { timeout: 150000, maxBuffer: 32 * 1024 * 1024 }
@@ -87,8 +87,8 @@ export async function GET(req: Request) {
       } catch (e) {
         const err = e as { stderr?: string; message?: string };
         const lines = String(err.stderr ?? err.message).split("\n");
-        const kept = lines.filter((l) => /pot|PO Token|provider|generate_once|node/i.test(l));
-        return `FAIL: kept=${JSON.stringify(kept.slice(0, 20))} tail=${lines.slice(-3).join(" | ").slice(0, 500)}`;
+        const kept = lines.filter((l) => /pot|PO Token|provider|generate_once|node|fetch_pot|Fetching|token/i.test(l));
+        return `FAIL: args=${JSON.stringify(ytDlpPotArgs())} kept=${JSON.stringify(kept.slice(0, 25))} tail=${lines.slice(-3).join(" | ").slice(0, 500)}`;
       }
     });
   }
