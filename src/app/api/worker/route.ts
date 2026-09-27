@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { runPscScrapeJob } from "@/lib/worker/psc-scrape";
 import { runNewsScrapeJob } from "@/lib/worker/news-scrape";
-import { createDraftPost, publishDraftPost, deleteDraftPost, type WorkerCtx } from "@/lib/worker/digest-post";
+import { createDraftPost, publishDraftPost, deleteDraftPost, createQuiz, type WorkerCtx } from "@/lib/worker/digest-post";
 
 /**
  * Backend worker for the current-affairs site, hosted on this Koyeb service.
@@ -9,9 +9,13 @@ import { createDraftPost, publishDraftPost, deleteDraftPost, type WorkerCtx } fr
  * POST /api/worker
  *   Authorization: Bearer <WORKER_SECRET>
  *   { "job": "publish-due-posts" | "publish-quiz" | "psc-scrape"
- *     | "news-scrape" | "create-post" | "publish-post",
+ *     | "news-scrape" | "create-post" | "publish-post" | "delete-post"
+ *     | "create-quiz",
  *     "slug"?: string, "dry_run"?: boolean,
  *     // create-post only: title, excerpt, content_html, category_slug, tags
+ *     // create-quiz only: title, slug, description, post_slug,
+ *     //   category_slug, difficulty, time_limit_seconds, status,
+ *     //   questions: [{question, options[], correct_index, explanation}]
  *   }
  *
  * Jobs replicate the site's own backend flows server-side (Supabase
@@ -30,6 +34,9 @@ import { createDraftPost, publishDraftPost, deleteDraftPost, type WorkerCtx } fr
  *   - publish-post: publish a draft post by slug — generates the branded
  *     thumbnail, flips to published, announces on Telegram.
  *   - delete-post: delete a draft post by slug (rejected digests cleanup).
+ *   - create-quiz: create a quiz with questions, optionally linked to a
+ *     digest post via post_slug (quizzes.post_id). Idempotent on slug.
+ *     Status draft|published; published quizzes appear in /quiz.
  * After each job the worker asks the site to revalidate the affected
  * paths (its public pages are ISR-cached for 5 minutes).
  *
@@ -384,8 +391,50 @@ export async function POST(req: Request) {
       const r = await deleteDraftPost(ctx(), slug);
       return NextResponse.json({ ok: true, job, ...r });
     }
+    if (job === "create-quiz") {
+      const b = body as {
+        title?: unknown;
+        slug?: unknown;
+        description?: unknown;
+        post_slug?: unknown;
+        category_slug?: unknown;
+        difficulty?: unknown;
+        time_limit_seconds?: unknown;
+        questions?: unknown;
+        status?: unknown;
+      };
+      const questions = Array.isArray(b.questions) ? b.questions : [];
+      const r = await createQuiz(ctx(), {
+        title: String(b.title || ""),
+        slug: String(b.slug || ""),
+        description: String(b.description || ""),
+        post_slug: String(b.post_slug || ""),
+        category_slug: String(b.category_slug || ""),
+        difficulty: String(b.difficulty || "medium"),
+        time_limit_seconds:
+          b.time_limit_seconds === null || b.time_limit_seconds === undefined
+            ? null
+            : Number(b.time_limit_seconds),
+        questions: questions.map((q) => {
+          const qq = q as {
+            question?: unknown;
+            options?: unknown;
+            correct_index?: unknown;
+            explanation?: unknown;
+          };
+          return {
+            question: String(qq.question || ""),
+            options: Array.isArray(qq.options) ? qq.options.map(String) : [],
+            correct_index: Number(qq.correct_index ?? 0),
+            explanation: String(qq.explanation || ""),
+          };
+        }),
+        status: b.status === "published" ? "published" : "draft",
+      });
+      return NextResponse.json({ ok: true, job, ...r });
+    }
     return NextResponse.json(
-      { error: "Unknown job. Use publish-due-posts, publish-quiz, psc-scrape, news-scrape, create-post, publish-post, or delete-post." },
+      { error: "Unknown job. Use publish-due-posts, publish-quiz, psc-scrape, news-scrape, create-post, publish-post, delete-post, or create-quiz." },
       { status: 400 }
     );
   } catch (err) {
