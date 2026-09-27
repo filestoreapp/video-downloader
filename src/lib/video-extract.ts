@@ -276,11 +276,25 @@ async function resolveYoutubeFastWith(
   };
 }
 
+// Race a promise against a hard timeout. (AbortSignal.timeout only covers
+// the fetch headers — a server can send 200 OK and then stall the body
+// forever, hanging `res.json()`. This covers the whole attempt.)
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  let t: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>(
+    (_, rej) => (t = setTimeout(() => rej(new Error("timed out")), ms))
+  );
+  return Promise.race([p, timeout]).finally(() => clearTimeout(t));
+}
+
 // Race the ANDROID and IOS player clients: YouTube's bot check
 // ("Sign in to confirm you're not a bot") sometimes hits one client
-// but not the other. First success wins; both hang → 8s total, not 16s.
+// but not the other. First success wins; each attempt is hard-capped
+// at 8s including the response body, so a stalled body can't hang us.
 async function resolveYoutubeFast(url: string): Promise<ResolvedMedia> {
-  const attempts = YT_CLIENTS.map((c) => resolveYoutubeFastWith(url, c));
+  const attempts = YT_CLIENTS.map((c) =>
+    withTimeout(resolveYoutubeFastWith(url, c), 8000)
+  );
   try {
     return await Promise.any(attempts);
   } catch (e) {
