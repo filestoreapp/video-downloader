@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { runPscScrapeJob } from "@/lib/worker/psc-scrape";
 import { runNewsScrapeJob } from "@/lib/worker/news-scrape";
-import { createDraftPost, publishDraftPost, type WorkerCtx } from "@/lib/worker/digest-post";
+import { createDraftPost, publishDraftPost, deleteDraftPost, type WorkerCtx } from "@/lib/worker/digest-post";
 
 /**
  * Backend worker for the current-affairs site, hosted on this Koyeb service.
@@ -29,6 +29,7 @@ import { createDraftPost, publishDraftPost, type WorkerCtx } from "@/lib/worker/
  *     Idempotent on slug — an existing slug is returned untouched.
  *   - publish-post: publish a draft post by slug — generates the branded
  *     thumbnail, flips to published, announces on Telegram.
+ *   - delete-post: delete a draft post by slug (rejected digests cleanup).
  * After each job the worker asks the site to revalidate the affected
  * paths (its public pages are ISR-cached for 5 minutes).
  *
@@ -377,8 +378,14 @@ export async function POST(req: Request) {
       const r = await publishDraftPost(ctx(), slug);
       return NextResponse.json({ ok: true, job, ...r });
     }
+    if (job === "delete-post") {
+      const slug = String(body.slug || "").trim();
+      if (!slug) return NextResponse.json({ error: "slug required." }, { status: 400 });
+      const r = await deleteDraftPost(ctx(), slug);
+      return NextResponse.json({ ok: true, job, ...r });
+    }
     return NextResponse.json(
-      { error: "Unknown job. Use publish-due-posts, publish-quiz, psc-scrape, news-scrape, create-post, or publish-post." },
+      { error: "Unknown job. Use publish-due-posts, publish-quiz, psc-scrape, news-scrape, create-post, publish-post, or delete-post." },
       { status: 400 }
     );
   } catch (err) {

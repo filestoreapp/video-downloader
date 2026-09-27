@@ -34,7 +34,7 @@ function sbHeaders(ctx: WorkerCtx): HeadersInit {
 async function sb(
   ctx: WorkerCtx,
   path: string,
-  method: "GET" | "POST" | "PATCH" = "GET",
+  method: "GET" | "POST" | "PATCH" | "DELETE" = "GET",
   body?: unknown
 ): Promise<{ ok: boolean; status: number; data: unknown }> {
   const res = await fetch(`${ctx.sbUrl}/rest/v1/${path}`, {
@@ -174,7 +174,26 @@ export async function createDraftPost(ctx: WorkerCtx, input: CreatePostInput) {
   return { id: created.id, slug, status: "draft", already: false as const };
 }
 
-/** Branded 1200x630 thumbnail: English title + IST date on a deep-green gradient. */
+/**
+ * Delete a post by slug — only drafts can be deleted here (safety guard).
+ * Used to clean up rejected digest drafts.
+ */
+export async function deleteDraftPost(ctx: WorkerCtx, slug: string) {
+  const found = await sb(
+    ctx,
+    `posts?${new URLSearchParams({ select: "id,status", slug: `eq.${slug}` })}`
+  );
+  if (!found.ok) throw new Error(`Supabase read failed (${found.status})`);
+  const rows = found.data as { id: string; status: string }[];
+  const post = rows[0];
+  if (!post) throw new Error(`No post found with slug "${slug}"`);
+  if (post.status !== "draft") {
+    throw new Error(`Refusing to delete post "${slug}" with status "${post.status}" — drafts only.`);
+  }
+  const del = await sb(ctx, `posts?id=eq.${post.id}`, "DELETE");
+  if (!del.ok) throw new Error(`Delete failed (${del.status})`);
+  return { slug, deleted: true as const };
+}
 async function makeDigestThumbnail(dateLong: string): Promise<Buffer> {
   const svg = `<svg width="1200" height="630" xmlns="http://www.w3.org/2000/svg">
 <defs>
