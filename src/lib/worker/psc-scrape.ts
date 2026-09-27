@@ -307,9 +307,12 @@ export async function runPscScrapeJob(ctx: Ctx, dryRun: boolean): Promise<Scrape
       continue;
     }
 
-    // Dedupe against what's already stored.
+    // Dedupe against what's already stored. Each value must be
+    // percent-encoded: PostgREST parses the `in.(...)` list after the
+    // query string is decoded, so a raw `&` or `,` inside a URL would
+    // corrupt the filter and make existing rows look new.
     const inList = items
-      .map((i) => `"${i.source_url.replace(/"/g, "")}"`)
+      .map((i) => encodeURIComponent(`"${i.source_url.replace(/"/g, "")}"`))
       .join(",");
     const sel = await fetch(
       `${ctx.sbUrl}/rest/v1/psc_updates?select=source_url&source_url=in.(${inList})`,
@@ -354,6 +357,19 @@ export async function runPscScrapeJob(ctx: Ctx, dryRun: boolean): Promise<Scrape
       ),
     });
     if (!ins.ok) {
+      // 409 = unique conflict: the row appeared between our dedupe check
+      // and the insert (or the check missed it). Treat as already-stored
+      // and skip it rather than failing the whole source.
+      if (ins.status === 409) {
+        results.push({
+          source: source.key,
+          label: source.label,
+          fetched: items.length,
+          inserted: 0,
+          error: "already stored (409 on insert, skipped)",
+        });
+        continue;
+      }
       fail(`Supabase insert failed (${ins.status})`);
       continue;
     }
