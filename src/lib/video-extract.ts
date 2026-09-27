@@ -144,6 +144,14 @@ export function ytDlpPotArgs(): string[] {
     pluginDir,
     "--extractor-args",
     `youtubepot-bgutilscript:server_home=${serverDir}`,
+    // yt-dlp only consults PO-token providers when a token is "required" or
+    // "recommended" for the client (fetch_pot=auto, the default). The default
+    // player clients (visionos, web) have neither flag, so the provider sat
+    // idle and every walled video failed. "always" makes yt-dlp actually ask
+    // the provider for a token. Unsupported clients (visionos) are rejected
+    // gracefully and the next client is tried.
+    "--extractor-args",
+    "youtube:fetch_pot=always",
   ];
 }
 
