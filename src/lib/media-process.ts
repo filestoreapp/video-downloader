@@ -22,13 +22,15 @@ import {
 
 const execFileAsync = promisify(execFile);
 
-export type ProcessMode = "mp3" | "clip" | "fullvideo";
+export type ProcessMode = "mp3" | "clip" | "fullvideo" | "hdvideo";
 
 export interface ProcessParams {
   url: string;
   mode: ProcessMode;
   start?: number;
   end?: number;
+  /** requested video height for hdvideo mode */
+  qualityHeight?: number;
 }
 
 export interface ProcessedFile {
@@ -189,6 +191,40 @@ export async function processMedia(p: ProcessParams): Promise<ProcessedFile> {
       contentType: "video/mp4",
       filename: `${base}-clip-${Math.round(start)}s-${Math.round(end)}s.mp4`,
       cleanup: () => fs.rmSync(tmp, { force: true }),
+    };
+  }
+
+  // p.mode === "hdvideo" — mux the DASH video-only stream at the requested
+  // quality with the best audio stream. Stream copy, so it's fast.
+  if (p.mode === "hdvideo") {
+    const want = p.qualityHeight || 720;
+    const cands = [...media.dashVideo]
+      .filter((v) => v.height <= want)
+      .sort((a, b) => b.height - a.height);
+    const video = cands[0] ?? [...media.dashVideo].sort((a, b) => b.height - a.height)[0];
+    if (!video) throw new Error("This quality is not available for this video.");
+    const args = [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-i",
+      video.url,
+    ];
+    if (media.audioUrl) args.push("-i", media.audioUrl);
+    args.push(
+      "-c",
+      "copy",
+      "-movflags",
+      "frag_keyframe+empty_moov",
+      "-f",
+      "mp4",
+      "pipe:1"
+    );
+    const { webStream } = runStreaming(ffmpegBin(), args);
+    return {
+      body: webStream,
+      contentType: "video/mp4",
+      filename: `${base}-${video.height}p.mp4`,
     };
   }
 

@@ -15,8 +15,9 @@ interface ServerOption {
   id: string;
   label: string;
   sub?: string;
-  mode: "mp3" | "clip" | "fullvideo";
+  mode: "mp3" | "clip" | "fullvideo" | "hdvideo";
   needsTime: boolean;
+  quality?: number;
 }
 type DlOption = DirectOption | ServerOption;
 
@@ -140,7 +141,43 @@ export default function Home() {
     }
   }
 
-  /** Server-rendered option (MP3 / clip): POST, then save the blob. */
+  /** In-app download: the CDN file streams through our server as an
+   *  attachment, so it saves to the device instead of opening a new tab. */
+  async function downloadDirect(opt: DirectOption) {
+    if (busyId) return;
+    setProcError(null);
+    setBusyId(opt.id);
+    try {
+      const res = await fetch(
+        `/api/dl/fetch?u=${encodeURIComponent(opt.url)}&n=${encodeURIComponent(opt.filename)}`
+      );
+      if (!res.ok) {
+        const text = await res.text();
+        let msg = "Download failed. Please try again.";
+        try {
+          const d = JSON.parse(text);
+          if (d.error) msg = d.error;
+        } catch {
+          msg = "The server is waking up. Please try again in a few seconds.";
+        }
+        throw new Error(msg);
+      }
+      const blob = await res.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = opt.filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    } catch (err) {
+      setProcError(err instanceof Error ? err.message : "Download failed.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  /** Server-rendered option (MP3 / HD video / clip): POST, then save the blob. */
   async function runServerOption(opt: ServerOption, start?: number, end?: number) {
     if (busyId) return;
     setProcError(null);
@@ -149,7 +186,13 @@ export default function Home() {
       const res = await fetch("/api/dl/process", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: url.trim(), mode: opt.mode, start, end }),
+        body: JSON.stringify({
+          url: url.trim(),
+          mode: opt.mode,
+          start,
+          end,
+          qualityHeight: opt.quality,
+        }),
       });
       if (!res.ok) {
         const text = await res.text();
@@ -193,6 +236,26 @@ export default function Home() {
       return;
     }
     runServerOption(opt, Math.floor(start), Math.ceil(end));
+  }
+
+  /** seconds -> "m:ss" for the clip inputs */
+  function fmtClock(sec: number): string {
+    const m = Math.floor(sec / 60);
+    const s = Math.round(sec % 60);
+    return `${m}:${String(s).padStart(2, "0")}`;
+  }
+
+  /** Quick chip: clip of `dur` seconds starting at the current start (or 0). */
+  function applyChip(dur: number) {
+    const start = parseTime(clipStart) ?? 0;
+    if (!clipStart.trim()) setClipStart(fmtClock(start));
+    setClipEnd(fmtClock(start + dur));
+    setProcError(null);
+  }
+
+  function chipLabel(dur: number): string {
+    if (dur < 60) return `${dur}s`;
+    return `${dur / 60}m`;
   }
 
   const videos = result?.options.filter((o) => o.id.startsWith("video")) ?? [];
@@ -324,9 +387,25 @@ export default function Home() {
             </div>
 
             <div className="tab-panel">
-              {tab === "video" && <FormatRows options={videos} busyId={busyId} onServer={runServerOption} busyLabel="Preparing video…" />}
-              {tab === "audio" && <FormatRows options={audios} busyId={busyId} onServer={runServerOption} busyLabel="Converting…" />}
-              {tab === "photos" && <PhotoGrid options={photos} />}
+              {tab === "video" && (
+                <FormatRows
+                  options={videos}
+                  busyId={busyId}
+                  onServer={runServerOption}
+                  onDirect={downloadDirect}
+                  busyLabel="Preparing video…"
+                />
+              )}
+              {tab === "audio" && (
+                <FormatRows
+                  options={audios}
+                  busyId={busyId}
+                  onServer={runServerOption}
+                  onDirect={downloadDirect}
+                  busyLabel="Converting…"
+                />
+              )}
+              {tab === "photos" && <PhotoGrid options={photos} onDirect={downloadDirect} />}
               {tab === "clip" && clipOpt && (
                 <div className="clipper">
                   <div className="clip-inputs">
@@ -354,6 +433,26 @@ export default function Home() {
                     Times like <b>2:03</b> or <b>1:02:03</b>. Max 10 minutes per clip.
                     {result.duration != null && <> Video length: <b>{fmtDuration(result.duration)}</b>.</>}
                   </p>
+                  <div className="chip-row">
+                    {[15, 30, 60, 300].map((d) => (
+                      <button key={d} type="button" className="chip" onClick={() => applyChip(d)}>
+                        ⏱ {chipLabel(d)}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="chip-row">
+                    <button type="button" className="chip ghost" onClick={() => setClipStart("0:00")}>
+                      ⇤ From start
+                    </button>
+                    <button
+                      type="button"
+                      className="chip ghost"
+                      disabled={result.duration == null}
+                      onClick={() => result.duration != null && setClipEnd(fmtClock(result.duration))}
+                    >
+                      To end ⇥
+                    </button>
+                  </div>
                   <button
                     className="btn-primary"
                     disabled={busyId !== null}
@@ -433,8 +532,12 @@ export default function Home() {
               a: "Public YouTube videos and public Instagram reels, videos and photo posts. Private posts, stories and profile photos are not supported.",
             },
             {
-              q: "Why do some downloads start instantly and others take a few seconds?",
-              a: "Video, M4A audio and photos come straight from the source servers, so they start instantly. MP3s and clips are prepared on our server first, which takes a few seconds.",
+              q: "Where do the files go when I tap download?",
+              a: "Straight to your device — everything downloads inside this page. Nothing opens in a new tab or another site.",
+            },
+            {
+              q: "Why do HD videos take longer?",
+              a: "The instant 360p video comes straight from the source. HD qualities (480p/720p/1080p), MP3s and clips are prepared on our server first, which takes a little longer.",
             },
             {
               q: "The first visit took a while to load. Why?",
@@ -464,11 +567,13 @@ function FormatRows({
   options,
   busyId,
   onServer,
+  onDirect,
   busyLabel,
 }: {
   options: DlOption[];
   busyId: string | null;
   onServer: (opt: ServerOption) => void;
+  onDirect: (opt: DirectOption) => void;
   busyLabel: string;
 }) {
   return (
@@ -480,9 +585,15 @@ function FormatRows({
               <p className="fmt-label">{o.label}</p>
               {o.sub && <p className="fmt-sub">{o.sub}</p>}
             </div>
-            <a href={o.url} target="_blank" rel="noopener noreferrer" className="dl-btn" download={o.filename}>
-              ⬇ Download
-            </a>
+            <button className="dl-btn" disabled={busyId !== null} onClick={() => onDirect(o)}>
+              {busyId === o.id ? (
+                <>
+                  <span className="spinner" /> Saving…
+                </>
+              ) : (
+                "⬇ Download"
+              )}
+            </button>
           </div>
         ) : (
           <div key={o.id} className="fmt-row">
@@ -507,24 +618,22 @@ function FormatRows({
 }
 
 /** Grid of photo previews with download buttons. */
-function PhotoGrid({ options }: { options: DlOption[] }) {
+function PhotoGrid({
+  options,
+  onDirect,
+}: {
+  options: DlOption[];
+  onDirect: (opt: DirectOption) => void;
+}) {
   const photos = options.filter((o): o is DirectOption => o.kind === "direct");
   return (
     <div className="photo-grid">
       {photos.map((o, i) => (
-        <a
-          key={o.id}
-          href={o.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="photo-tile"
-          download={o.filename}
-          title={o.label}
-        >
+        <button key={o.id} className="photo-tile" onClick={() => onDirect(o)} title={o.label}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={o.url} alt={`Photo ${i + 1}`} loading="lazy" />
           <span className="photo-dl">⬇</span>
-        </a>
+        </button>
       ))}
     </div>
   );

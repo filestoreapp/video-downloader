@@ -37,8 +37,10 @@ export interface ServerOption {
   id: string;
   label: string;
   sub?: string;
-  mode: "mp3" | "clip" | "fullvideo";
+  mode: "mp3" | "clip" | "fullvideo" | "hdvideo";
   needsTime: boolean;
+  /** requested video height for hdvideo mode (e.g. 720) */
+  quality?: number;
 }
 export type DlOption = DirectOption | ServerOption;
 
@@ -63,6 +65,8 @@ export interface ResolvedMedia {
   videoLabel: string | null;
   /** best direct audio-only URL, if available */
   audioUrl: string | null;
+  /** video-only DASH MP4 streams (YouTube fast path), for HD muxing */
+  dashVideo: { url: string; height: number }[];
   /** original URL — needed for yt-dlp server-side modes */
   sourceUrl: string;
   /** true when the YouTube fast path failed and yt-dlp must render video */
@@ -155,6 +159,13 @@ interface YtFormat {
   mimeType?: string;
   qualityLabel?: string;
   bitrate?: number;
+  height?: number;
+}
+
+function dashHeight(f: YtFormat): number {
+  if (typeof f.height === "number" && f.height > 0) return f.height;
+  const m = /(\d{3,4})p/.exec(f.qualityLabel || "");
+  return m ? Number(m[1]) : 0;
 }
 
 async function resolveYoutubeFast(url: string): Promise<ResolvedMedia> {
@@ -196,9 +207,18 @@ async function resolveYoutubeFast(url: string): Promise<ResolvedMedia> {
   const progressive: YtFormat[] = (data?.streamingData?.formats ?? []).filter(
     (f: YtFormat) => f.url
   );
-  const audio: YtFormat[] = (data?.streamingData?.adaptiveFormats ?? []).filter(
-    (f: YtFormat) => f.url && (f.mimeType || "").startsWith("audio/")
+  const adaptive: YtFormat[] = (data?.streamingData?.adaptiveFormats ?? []).filter(
+    (f: YtFormat) => f.url
   );
+  const audio: YtFormat[] = adaptive.filter((f: YtFormat) =>
+    (f.mimeType || "").startsWith("audio/")
+  );
+  // Video-only DASH MP4 streams for the HD mux options.
+  const dashVideo = adaptive
+    .filter((f: YtFormat) => (f.mimeType || "").startsWith("video/mp4"))
+    .map((f) => ({ url: f.url as string, height: dashHeight(f) }))
+    .filter((v) => v.height > 0)
+    .sort((a, b) => b.height - a.height);
   if (!progressive.length && !audio.length) {
     throw new Error("No downloadable stream found for this video.");
   }
@@ -218,6 +238,7 @@ async function resolveYoutubeFast(url: string): Promise<ResolvedMedia> {
     videoUrl: progressive.length ? (progressive[0].url as string) : null,
     videoLabel: progressive.length ? progressive[0].qualityLabel || "Video" : null,
     audioUrl: audio.length ? (audio[0].url as string) : null,
+    dashVideo,
     sourceUrl: url,
     youtubeFallback: false,
   };
@@ -258,6 +279,7 @@ async function resolveYoutubeFallback(url: string): Promise<ResolvedMedia> {
     videoUrl: null,
     videoLabel: null,
     audioUrl: audio.length ? (audio[0].url as string) : null,
+    dashVideo: [],
     sourceUrl: url,
     youtubeFallback: true,
   };
@@ -349,7 +371,7 @@ export async function extractMedia(url: string): Promise<ExtractOk> {
         kind: "direct",
         id: "video",
         label: q && q !== "Video" ? `Video · ${q} MP4` : "Video · MP4",
-        sub: "downloads instantly",
+        sub: "saves to your device",
         url: m.videoUrl,
         filename: `${base}.mp4`,
       });
@@ -358,12 +380,27 @@ export async function extractMedia(url: string): Promise<ExtractOk> {
         serverOption("video", "Video · MP4", "prepared on the server — takes a minute", "fullvideo")
       );
     }
+    // HD qualities: mux the DASH video-only stream with audio server-side.
+    const hdHeights = [...new Set(m.dashVideo.map((v) => v.height))]
+      .filter((h) => h === 480 || h === 720 || h === 1080)
+      .sort((a, b) => b - a);
+    for (const h of hdHeights) {
+      options.push({
+        kind: "server",
+        id: `video-${h}p`,
+        label: `Video · ${h}p${h >= 720 ? " HD" : ""} MP4`,
+        sub: "best quality — prepared on the server",
+        mode: "hdvideo",
+        needsTime: false,
+        quality: h,
+      });
+    }
     if (m.audioUrl) {
       options.push({
         kind: "direct",
         id: "audio-m4a",
         label: "Audio · M4A",
-        sub: "downloads instantly",
+        sub: "saves to your device",
         url: m.audioUrl,
         filename: `${base}.m4a`,
       });
@@ -403,7 +440,7 @@ export async function extractMedia(url: string): Promise<ExtractOk> {
           kind: "direct",
           id: `video-${videos}`,
           label: `Video ${videos} · ${v.label} MP4`,
-          sub: "downloads instantly",
+          sub: "saves to your device",
           url: v.url,
           filename: `${fname}-video${videos}.mp4`,
         });
@@ -415,7 +452,7 @@ export async function extractMedia(url: string): Promise<ExtractOk> {
           kind: "direct",
           id: `photo-${photos}`,
           label: `Photo ${photos}`,
-          sub: "downloads instantly",
+          sub: "saves to your device",
           url: u,
           filename: `${fname}-photo${photos}.jpg`,
         });
@@ -430,7 +467,7 @@ export async function extractMedia(url: string): Promise<ExtractOk> {
         kind: "direct",
         id: "video",
         label: `Video${vq} MP4`,
-        sub: "downloads instantly",
+        sub: "saves to your device",
         url: v.url,
         filename: `${fname}.mp4`,
       });
@@ -444,7 +481,7 @@ export async function extractMedia(url: string): Promise<ExtractOk> {
           kind: "direct",
           id: `photo-${i}`,
           label: imgs.length > 1 ? `Photo ${i + 1}` : "Photo",
-          sub: "downloads instantly",
+          sub: "saves to your device",
           url: u,
           filename: `${fname}-${i + 1}.jpg`,
         });
@@ -477,6 +514,7 @@ export async function resolveForProcess(url: string): Promise<ResolvedMedia> {
     videoUrl: v.url,
     videoLabel: v.label,
     audioUrl: null,
+    dashVideo: [],
     sourceUrl: url,
     youtubeFallback: false,
   };
