@@ -16,13 +16,17 @@ interface Source {
   name: string;
   url: string;
   base: string;
+  type: "html" | "rss";
+  /** Heading selector for html sources; the anchor is resolved from a child <a> or the closest parent <a>. */
+  headingSelector?: string;
 }
 
 const SOURCES: Source[] = [
-  { name: "Mathrubhumi", url: "https://www.mathrubhumi.com/", base: "https://www.mathrubhumi.com" },
-  { name: "Manorama", url: "https://www.manoramaonline.com/", base: "https://www.manoramaonline.com" },
-  { name: "Deshabhimani", url: "https://www.deshabhimani.com/", base: "https://www.deshabhimani.com" },
-  { name: "Madhyamam", url: "https://www.madhyamam.com/", base: "https://www.madhyamam.com" },
+  { name: "Mathrubhumi", url: "https://www.mathrubhumi.com/", base: "https://www.mathrubhumi.com", type: "html", headingSelector: "h1, h2, h3" },
+  { name: "Manorama", url: "https://www.manoramaonline.com/", base: "https://www.manoramaonline.com", type: "html", headingSelector: "h1, h2, h3" },
+  { name: "TwentyFour", url: "https://www.twentyfournews.com/feed", base: "https://www.twentyfournews.com", type: "rss" },
+  { name: "Reporter", url: "https://reporterlive.com/", base: "https://reporterlive.com", type: "html", headingSelector: "h1, h2, h3, h4, h5" },
+  { name: "Asianet", url: "https://www.asianetnews.com/rss", base: "https://www.asianetnews.com", type: "rss" },
 ];
 
 const UA =
@@ -41,9 +45,10 @@ function normTitle(t: string): string {
     .trim();
 }
 
-async function scrapeSource(src: Source): Promise<NewsItem[]> {
+async function scrapeHtmlSource(src: Source): Promise<NewsItem[]> {
   const res = await fetch(src.url, {
     headers: { "User-Agent": UA },
+    redirect: "follow",
     signal: AbortSignal.timeout(25000),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -52,10 +57,13 @@ async function scrapeSource(src: Source): Promise<NewsItem[]> {
   const items: NewsItem[] = [];
   const seen = new Set<string>();
 
-  // Headline links: h1/h2/h3 containing (or wrapped by) an anchor.
-  $("h1 a, h2 a, h3 a").each((_, el) => {
-    const a = $(el);
-    const title = cleanTitle(a.text());
+  // Headline text lives in headings; the link is either a child <a>
+  // (h2 > a) or the wrapping parent <a> (a > h5).
+  $(src.headingSelector || "h1, h2, h3").each((_, el) => {
+    const h = $(el);
+    const title = cleanTitle(h.text());
+    let a = h.find("a").first();
+    if (!a.length) a = h.closest("a");
     let href = (a.attr("href") || "").trim();
     if (title.length < 25 || title.length > 220) return;
     if (!href || href.startsWith("#") || href.startsWith("javascript:")) return;
@@ -67,6 +75,36 @@ async function scrapeSource(src: Source): Promise<NewsItem[]> {
     items.push({ source: src.name, title, url: href });
   });
   return items.slice(0, 25);
+}
+
+async function scrapeRssSource(src: Source): Promise<NewsItem[]> {
+  const res = await fetch(src.url, {
+    headers: { "User-Agent": UA },
+    redirect: "follow",
+    signal: AbortSignal.timeout(25000),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const xml = await res.text();
+  const $ = cheerio.load(xml, { xmlMode: true });
+  const items: NewsItem[] = [];
+  const seen = new Set<string>();
+
+  $("item").each((_, el) => {
+    const it = $(el);
+    const title = cleanTitle(it.find("title").text());
+    const href = cleanTitle(it.find("link").text());
+    if (title.length < 25 || title.length > 220) return;
+    if (!href.startsWith("http")) return;
+    const key = normTitle(title);
+    if (seen.has(key)) return;
+    seen.add(key);
+    items.push({ source: src.name, title, url: href });
+  });
+  return items.slice(0, 25);
+}
+
+async function scrapeSource(src: Source): Promise<NewsItem[]> {
+  return src.type === "rss" ? scrapeRssSource(src) : scrapeHtmlSource(src);
 }
 
 export async function runNewsScrapeJob(): Promise<{
