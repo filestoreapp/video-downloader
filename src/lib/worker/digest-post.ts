@@ -279,3 +279,125 @@ export async function publishDraftPost(ctx: WorkerCtx, slug: string) {
     revalidated,
   };
 }
+
+export interface QuizQuestionInput {
+  question: string;
+  options: string[];
+  correct_index: number;
+  explanation?: string;
+}
+
+export interface CreateQuizInput {
+  title: string;
+  slug: string;
+  description?: string;
+  /** Digest post slug — resolved to quizzes.post_id so the quiz links back to the post. */
+  post_slug?: string;
+  category_slug?: string;
+  difficulty?: string;
+  time_limit_seconds?: number | null;
+  questions: QuizQuestionInput[];
+  status?: "draft" | "published";
+}
+
+/**
+ * Create a quiz (with questions) linked to a digest post. Idempotent on
+ * slug: if a quiz with the slug already exists it is returned untouched
+ * (never overwritten, questions never duplicated).
+ */
+export async function createQuiz(ctx: WorkerCtx, input: CreateQuizInput) {
+  const slug = input.slug.trim().toLowerCase();
+  if (!slug) throw new Error("slug required.");
+  if (!input.title?.trim()) throw new Error("title required.");
+  const questions = Array.isArray(input.questions) ? input.questions : [];
+  if (questions.length === 0) throw new Error("at least one question is required.");
+  for (const [i, q] of questions.entries()) {
+    if (!q.question?.trim()) throw new Error(`question ${i + 1}: text required.`);
+    if (!Array.isArray(q.options) || q.options.length < 2)
+      throw new Error(`question ${i + 1}: at least 2 options required.`);
+    if (
+      typeof q.correct_index !== "number" ||
+      q.correct_index < 0 ||
+      q.correct_index >= q.options.length
+    )
+      throw new Error(`question ${i + 1}: correct_index out of range.`);
+  }
+
+  const existing = await sb(
+    ctx,
+    `quizzes?${new URLSearchParams({ select: "id,slug,status,title", slug: `eq.${slug}` })}`
+  );
+  if (!existing.ok) throw new Error(`Supabase read failed (${existing.status})`);
+  const rows = existing.data as { id: string; slug: string; status: string; title: string }[];
+  if (rows.length > 0) {
+    const qc = await sb(
+      ctx,
+      `quiz_questions?${new URLSearchParams({ select: "id", quiz_id: `eq.${rows[0].id}` })}`
+    );
+    const count = Array.isArray(qc.data) ? qc.data.length : 0;
+    return { id: rows[0].id, slug: rows[0].slug, status: rows[0].status, already: true as const, questions: count };
+  }
+
+  let post_id: string | null = null;
+  if (input.post_slug) {
+    const p = await sb(
+      ctx,
+      `posts?${new URLSearchParams({ select: "id", slug: `eq.${input.post_slug.trim().toLowerCase()}` })}`
+    );
+    const prows = (p.ok ? p.data : []) as { id: string }[];
+    if (prows.length > 0) post_id = prows[0].id;
+  }
+
+  let category_id: string | null = null;
+  if (input.category_slug) {
+    const cat = await sb(
+      ctx,
+      `categories?${new URLSearchParams({ select: "id", slug: `eq.${input.category_slug}` })}`
+    );
+    const cats = (cat.ok ? cat.data : []) as { id: string }[];
+    if (cats.length > 0) category_id = cats[0].id;
+  }
+
+  const status = input.status === "published" ? "published" : "draft";
+  const ins = await sb(ctx, "quizzes", "POST", {
+    title: input.title.trim(),
+    slug,
+    description: input.description || null,
+    post_id,
+    category_id,
+    difficulty: input.difficulty || "medium",
+    time_limit_seconds: input.time_limit_seconds ?? null,
+    is_mock: false,
+    is_pyq: false,
+    negative_marking: 0,
+    status,
+  });
+  if (!ins.ok) {
+    if (ins.status === 409) {
+      return { id: "", slug, status: "draft", already: true as const, questions: 0 };
+    }
+    throw new Error(`Quiz insert failed (${ins.status}): ${JSON.stringify(ins.data).slice(0, 200)}`);
+  }
+  const quizId = ((ins.data as { id: string }[])[0] || {}).id;
+  if (!quizId) throw new Error("Quiz insert returned no id.");
+
+  const qrows = questions.map((q, i) => ({
+    quiz_id: quizId,
+    question: q.question.trim(),
+    options: q.options.map((o) => String(o)),
+    correct_index: q.correct_index,
+    explanation: q.explanation || null,
+    position: i,
+  }));
+  const qins = await sb(ctx, "quiz_questions", "POST", qrows);
+  if (!qins.ok) {
+    // Roll back the quiz shell so a retry stays clean.
+    await sb(ctx, `quizzes?id=eq.${quizId}`, "DELETE").catch(() => {});
+    throw new Error(
+      `Question insert failed (${qins.status}): ${JSON.stringify(qins.data).slice(0, 200)}`
+    );
+  }
+
+  const revalidated = await revalidate(ctx, ["/quiz", `/quiz/${slug}`]);
+  return { id: quizId, slug, status, already: false as const, questions: qrows.length, revalidated };
+}
