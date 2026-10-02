@@ -61,9 +61,10 @@ const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 const TG_CHANNEL =
   process.env.TELEGRAM_CHANNEL_ID || "@Daily_CurrentAffairs_Malayalam";
-const SITE_URL = (
-  process.env.CA_SITE_URL || "https://currentaffairsweb.vercel.app"
-).replace(/\/+$/, "");
+// Canonical site URL pinned to the custom domain (2026-10-02): the Koyeb
+// CA_SITE_URL env var still holds the old vercel.app URL. Revert to
+// env-based if the env var is ever updated in the Koyeb dashboard.
+const SITE_URL = "https://www.psccurrentaffairs.online";
 const REVALIDATE_URL = process.env.CA_REVALIDATE_URL || "";
 const REVALIDATE_SECRET = process.env.CA_REVALIDATE_SECRET || "";
 

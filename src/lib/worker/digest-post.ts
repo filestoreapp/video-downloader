@@ -208,7 +208,7 @@ async function makeDigestThumbnail(dateLong: string): Promise<Buffer> {
 <text x="80" y="230" font-family="Verdana, Geneva, sans-serif" font-size="92" font-weight="bold" fill="#ffffff" letter-spacing="2">DAILY CURRENT</text>
 <text x="80" y="330" font-family="Verdana, Geneva, sans-serif" font-size="92" font-weight="bold" fill="#ffffff" letter-spacing="2">AFFAIRS</text>
 <text x="80" y="420" font-family="Verdana, Geneva, sans-serif" font-size="44" fill="#fbbf24">${esc(dateLong)}</text>
-<text x="80" y="500" font-family="Verdana, Geneva, sans-serif" font-size="30" fill="#d1fae5">Kerala PSC • currentaffairsweb</text>
+<text x="80" y="500" font-family="Verdana, Geneva, sans-serif" font-size="30" fill="#d1fae5">Kerala PSC • psccurrentaffairs.online</text>
 </svg>`;
   const png = await sharp(Buffer.from(svg)).png().toBuffer();
   return compressImage(png);
