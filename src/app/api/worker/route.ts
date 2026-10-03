@@ -434,34 +434,6 @@ export async function POST(req: Request) {
       });
       return NextResponse.json({ ok: true, job, ...r });
     }
-    if (job === "test-hub-sync") {
-      const { syncExamHubs } = await import("@/lib/worker/exam-hub-sync");
-      const rows = [
-        {
-          id: null,
-          source: "result_notifications",
-          title: "RESULT - POLICE CONSTABLE (ARMED POLICE BATTALION) CAT.NO.563/2025",
-          category_number: "563/2025",
-          published_on: "2026-10-02",
-        },
-        {
-          id: null,
-          source: "notifications",
-          title: "LOWER DIVISION CLERK CAT.NO. 621/2026",
-          category_number: "621/2026",
-          published_on: "2026-10-03",
-        },
-        {
-          id: null,
-          source: "exam_programme",
-          title: "EXAMINATION PROGRAMME FOR THE MONTH OF OCTOBER 2026",
-          category_number: "080/2026",
-          published_on: null,
-        },
-      ];
-      const r = await syncExamHubs(ctx(), rows, true);
-      return NextResponse.json({ ok: true, job, dry_run: true, ...r });
-    }
     if (job === "fill-exam") {
       const b = body as { slug?: unknown; fields?: unknown };
       const examSlug = String(b.slug || "").trim().toLowerCase();
