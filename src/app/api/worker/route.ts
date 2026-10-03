@@ -434,8 +434,105 @@ export async function POST(req: Request) {
       });
       return NextResponse.json({ ok: true, job, ...r });
     }
+    if (job === "fill-exam") {
+      const b = body as { slug?: unknown; fields?: unknown };
+      const examSlug = String(b.slug || "").trim().toLowerCase();
+      if (!examSlug) {
+        return NextResponse.json({ error: "slug required." }, { status: 400 });
+      }
+      const ALLOWED = new Set([
+        "category_no",
+        "question_paper_code",
+        "notification_pdf_key",
+        "question_paper_pdf_key",
+        "qualification",
+        "age_limit",
+        "pay_scale",
+        "vacancy",
+        "notification_date",
+        "admit_card_date",
+        "exam_date",
+        "result_date",
+        "status",
+        "department",
+        "description",
+        "is_published",
+      ]);
+      const existing = await sb(
+        `exams?${new URLSearchParams({ select: "*", slug: `eq.${examSlug}`, limit: "1" })}`
+      );
+      const rows = Array.isArray(existing.data) ? existing.data : [];
+      if (rows.length === 0) {
+        return NextResponse.json(
+          { ok: false, job, slug: examSlug, error: "exam not found" },
+          { status: 404 }
+        );
+      }
+      const columns = Object.keys(rows[0] as Record<string, unknown>);
+      const fields = (b.fields || {}) as Record<string, unknown>;
+      const row: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(fields)) {
+        if (!ALLOWED.has(k)) continue;
+        row[k] = typeof v === "string" && v.trim() === "" ? null : v;
+      }
+      if (dryRun || Object.keys(row).length === 0) {
+        return NextResponse.json({
+          ok: true,
+          job,
+          slug: examSlug,
+          dry_run: true,
+          columns,
+          proposed: row,
+        });
+      }
+      const upd = await sb(
+        `exams?${new URLSearchParams({ slug: `eq.${examSlug}` })}`,
+        "PATCH",
+        row
+      );
+      if (!upd.ok) {
+        return NextResponse.json(
+          {
+            ok: false,
+            job,
+            slug: examSlug,
+            columns,
+            updateStatus: upd.status,
+            updateError: upd.data,
+          },
+          { status: 502 }
+        );
+      }
+      // Best-effort ISR revalidation (pages also refresh on their 5-min timer).
+      let revalidated = false;
+      try {
+        const c = ctx();
+        if (c.revalidateUrl && c.revalidateSecret) {
+          const rr = await fetch(c.revalidateUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              secret: c.revalidateSecret,
+              paths: ["/exams", `/exams/${examSlug}`],
+            }),
+            signal: AbortSignal.timeout(15000),
+          });
+          revalidated = rr.ok;
+        }
+      } catch {
+        /* non-fatal */
+      }
+      return NextResponse.json({
+        ok: true,
+        job,
+        slug: examSlug,
+        columns,
+        updated: row,
+        revalidated,
+      });
+    }
     return NextResponse.json(
-      { error: "Unknown job. Use publish-due-posts, publish-quiz, psc-scrape, news-scrape, create-post, publish-post, delete-post, or create-quiz." },
+      { error: "Unknown job. Use publish-due-posts, publish-quiz, psc-scrape, news-scrape, create-post, publish-post, delete-post, create-quiz, or fill-exam." },
       { status: 400 }
     );
   } catch (err) {
