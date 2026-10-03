@@ -13,6 +13,7 @@
  * CA_REVALIDATE_URL, CA_REVALIDATE_SECRET.
  */
 import * as cheerio from "cheerio";
+import { syncExamHubs, type HubSyncRow } from "./exam-hub-sync";
 
 export interface ScrapeSummary {
   ranAt: string;
@@ -20,6 +21,7 @@ export interface ScrapeSummary {
   totalInserted: number;
   revalidated: boolean;
   pageViewsPruned: number | null;
+  hubSync: { changes: string[]; suggestions: string[]; tagged: number } | null;
 }
 
 interface Ctx {
@@ -272,6 +274,7 @@ async function fetchSourceHtml(url: string): Promise<string> {
 
 export async function runPscScrapeJob(ctx: Ctx, dryRun: boolean): Promise<ScrapeSummary> {
   const results: ScrapeSummary["results"] = [];
+  const hubRows: HubSyncRow[] = [];
   let totalInserted = 0;
 
   const scraped = await Promise.all(
@@ -339,6 +342,15 @@ export async function runPscScrapeJob(ctx: Ctx, dryRun: boolean): Promise<Scrape
         inserted: 0,
         error: `dry run — would insert ${newItems.length}`,
       });
+      hubRows.push(
+        ...newItems.map((i) => ({
+          id: null,
+          source: i.source,
+          title: i.title,
+          category_number: i.category_number,
+          published_on: i.published_on,
+        }))
+      );
       continue;
     }
 
@@ -373,8 +385,9 @@ export async function runPscScrapeJob(ctx: Ctx, dryRun: boolean): Promise<Scrape
       fail(`Supabase insert failed (${ins.status})`);
       continue;
     }
-    const inserted = (await ins.json()) as { id: string; source: PscSourceKey; title: string }[];
+    const inserted = (await ins.json()) as (HubSyncRow & { id: string; source: PscSourceKey })[];
     totalInserted += inserted.length;
+    hubRows.push(...inserted);
 
     for (const row of inserted) {
       const ok = await postPscUpdateToTelegram(ctx, row);
@@ -396,9 +409,16 @@ export async function runPscScrapeJob(ctx: Ctx, dryRun: boolean): Promise<Scrape
     });
   }
 
+  // Phase-1 exam-hub auto-sync: match new rows to hubs by category number.
+  const hubSync = await syncExamHubs(ctx, hubRows, dryRun);
+
   let revalidated = false;
-  if (!dryRun && totalInserted > 0) {
-    revalidated = await revalidateSite(ctx, ["/psc-updates", "/", "/admin/psc-updates"]);
+  const revalidatePaths = ["/psc-updates", "/", "/admin/psc-updates"];
+  if (hubSync.revalidatePaths.length > 0) {
+    revalidatePaths.push("/exams", ...hubSync.revalidatePaths);
+  }
+  if (!dryRun && (totalInserted > 0 || hubSync.revalidatePaths.length > 0)) {
+    revalidated = await revalidateSite(ctx, revalidatePaths);
   }
 
   // Retention: page_views grows one row per visit — prune rows older
@@ -419,5 +439,16 @@ export async function runPscScrapeJob(ctx: Ctx, dryRun: boolean): Promise<Scrape
     }
   }
 
-  return { ranAt: new Date().toISOString(), results, totalInserted, revalidated, pageViewsPruned };
+  return {
+    ranAt: new Date().toISOString(),
+    results,
+    totalInserted,
+    revalidated,
+    pageViewsPruned,
+    hubSync: {
+      changes: hubSync.changes,
+      suggestions: hubSync.suggestions,
+      tagged: hubSync.tagged,
+    },
+  };
 }
