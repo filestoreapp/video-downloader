@@ -27,7 +27,7 @@ export const KIND_LABELS: Record<ExpenseKind, string> = {
 };
 
 export interface ExpenseEntry {
-  id: number;
+  id: string;
   created_at: string;
   entry_date: string;
   kind: ExpenseKind;

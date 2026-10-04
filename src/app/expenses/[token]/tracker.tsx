@@ -36,7 +36,7 @@ export default function Tracker({
   const [tab, setTab] = useState<"entries" | "deleted">("entries");
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [busyId, setBusyId] = useState<number | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
 
   const [kind, setKind] = useState<ExpenseKind>("spent");
   const [amount, setAmount] = useState("");
@@ -118,7 +118,7 @@ export default function Tracker({
     }
   };
 
-  const softDelete = async (id: number) => {
+  const softDelete = async (id: string) => {
     if (!confirm("Delete this entry? It will move to the Deleted tab.")) return;
     setBusyId(id);
     try {
@@ -135,7 +135,7 @@ export default function Tracker({
     }
   };
 
-  const restore = async (id: number) => {
+  const restore = async (id: string) => {
     setBusyId(id);
     try {
       const res = await fetch(`/api/expenses/${id}/restore`, {
@@ -151,7 +151,7 @@ export default function Tracker({
     }
   };
 
-  const purge = async (id: number) => {
+  const purge = async (id: string) => {
     if (!confirm("Delete this entry forever? This cannot be undone.")) return;
     setBusyId(id);
     try {

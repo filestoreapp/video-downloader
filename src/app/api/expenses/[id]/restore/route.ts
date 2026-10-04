@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getExpenseToken } from "@/lib/expenses";
-import { restoreEntry } from "@/lib/expense-db";
+import { restoreEntry } from "@/lib/sheet-db";
 
 export const dynamic = "force-dynamic";
 
@@ -17,8 +17,8 @@ export async function POST(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const { id } = await params;
-  const entryId = Number(id);
-  if (!Number.isInteger(entryId) || entryId <= 0) {
+  const entryId = decodeURIComponent(id).trim();
+  if (!entryId) {
     return NextResponse.json({ error: "Invalid id." }, { status: 400 });
   }
   try {
