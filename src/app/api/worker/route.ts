@@ -320,6 +320,17 @@ export async function POST(req: Request) {
       const r = await jobPublishDuePosts(dryRun);
       return NextResponse.json({ ok: true, job, dry_run: dryRun, ...r });
     }
+    if (job === "list-scheduled") {
+      const q = new URLSearchParams({
+        select: "slug,title,published_at",
+        status: "eq.scheduled",
+        order: "published_at.asc",
+      });
+      const found = await sb(`posts?${q}`);
+      if (!found.ok) throw new Error(`Supabase read failed (${found.status})`);
+      const rows = found.data as { slug: string; title: string; published_at: string }[];
+      return NextResponse.json({ ok: true, job, count: rows.length, posts: rows });
+    }
     if (job === "publish-quiz") {
       const slug = String(body.slug || "").trim();
       if (!slug) return NextResponse.json({ error: "slug required." }, { status: 400 });
