@@ -1,23 +1,57 @@
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from "crypto";
 import type { ExpenseEntry, ExpenseKind } from "./expenses";
 
 /**
- * Ledger storage: a JSON file in the filestoreapp/expense-tracker repo,
- * read and written through the GitHub Contents API with a repo-scoped
- * PAT (GITHUB_PAT env var, server-only, never in the repo).
+ * Ledger storage: an ENCRYPTED JSON file in the filestoreapp/images repo,
+ * read and written through the GitHub Contents API with the repo-scoped
+ * GITHUB_IMAGE_TOKEN (already in the service env, server-only).
  *
- * Why a file instead of Supabase: keeps the tracker's data fully separate
- * from the Supabase project that backs the PSC site. At this scale (two
- * people, a few entries a day) a versioned JSON file is more than enough —
- * and every change is audited as a commit.
+ * Why this shape:
+ * - Keeps the tracker's data fully separate from the Supabase project that
+ *   backs the PSC site (per the user's "use something else as database").
+ * - The repo is public, so the file is AES-256-GCM encrypted with a key
+ *   derived from EXPENSE_TOKEN (server-only). Browsing the repo reveals
+ *   nothing but ciphertext.
+ * - At this scale (two people, a few entries a day) a versioned JSON file
+ *   is more than enough — and every change is audited as a commit.
  */
 
-const GH_REPO = "filestoreapp/expense-tracker";
+const GH_REPO = "filestoreapp/images";
 const GH_PATH = "data/ledger.json";
 const GH_BRANCH = "main";
 
-function ghPat(): string {
-  const p = process.env.GITHUB_PAT;
-  if (!p) throw new Error("Missing GITHUB_PAT env var");
+function ledgerKey(): Buffer {
+  const t = process.env.EXPENSE_TOKEN;
+  if (!t) throw new Error("Missing EXPENSE_TOKEN env var");
+  return createHash("sha256").update(t, "utf8").digest();
+}
+
+function encryptLedger(plain: string): string {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", ledgerKey(), iv);
+  const ct = Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return Buffer.concat([iv, tag, ct]).toString("base64");
+}
+
+function decryptLedger(b64: string): string {
+  const raw = Buffer.from(b64, "base64");
+  if (raw.length < 28) throw new Error("Ledger file is corrupt");
+  const decipher = createDecipheriv(
+    "aes-256-gcm",
+    ledgerKey(),
+    raw.subarray(0, 12)
+  );
+  decipher.setAuthTag(raw.subarray(12, 28));
+  return Buffer.concat([
+    decipher.update(raw.subarray(28)),
+    decipher.final(),
+  ]).toString("utf8");
+}
+
+function ghToken(): string {
+  const p = process.env.GITHUB_IMAGE_TOKEN;
+  if (!p) throw new Error("Missing GITHUB_IMAGE_TOKEN env var");
   return p;
 }
 
@@ -30,7 +64,7 @@ async function ghApi(
     method,
     headers: {
       Accept: "application/vnd.github+json",
-      Authorization: `Bearer ${ghPat()}`,
+      Authorization: `Bearer ${ghToken()}`,
       "Content-Type": "application/json",
       "X-GitHub-Api-Version": "2022-11-28",
     },
@@ -51,8 +85,8 @@ async function readLedger(): Promise<LedgerFile> {
   if (res.status === 404) return { entries: [], sha: null };
   if (!res.ok) throw new Error(`Ledger read failed (HTTP ${res.status})`);
   const data = await res.json();
-  const text = Buffer.from(data.content as string, "base64").toString("utf8");
-  const entries = JSON.parse(text) as ExpenseEntry[];
+  const stored = Buffer.from(data.content as string, "base64").toString("utf8");
+  const entries = JSON.parse(decryptLedger(stored)) as ExpenseEntry[];
   if (!Array.isArray(entries)) throw new Error("Ledger file is corrupt");
   return { entries, sha: data.sha as string };
 }
@@ -61,9 +95,8 @@ async function writeLedger(
   entries: ExpenseEntry[],
   sha: string | null
 ): Promise<void> {
-  const content = Buffer.from(JSON.stringify(entries, null, 2)).toString(
-    "base64"
-  );
+  const stored = encryptLedger(JSON.stringify(entries));
+  const content = Buffer.from(stored, "utf8").toString("base64");
   const payload: Record<string, unknown> = {
     message: "Update expense ledger",
     content,
