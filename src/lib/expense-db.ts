@@ -6,14 +6,10 @@ import type { ExpenseEntry, ExpenseKind } from "./expenses";
  * read and written through the GitHub Contents API with the repo-scoped
  * GITHUB_IMAGE_TOKEN (already in the service env, server-only).
  *
- * Why this shape:
- * - Keeps the tracker's data fully separate from the Supabase project that
- *   backs the PSC site (per the user's "use something else as database").
- * - The repo is public, so the file is AES-256-GCM encrypted with a key
- *   derived from EXPENSE_TOKEN (server-only). Browsing the repo reveals
- *   nothing but ciphertext.
- * - At this scale (two people, a few entries a day) a versioned JSON file
- *   is more than enough — and every change is audited as a commit.
+ * The repo is public, so the file is AES-256-GCM encrypted with a key
+ * derived from EXPENSE_TOKEN (server-only). Browsing the repo reveals
+ * only ciphertext. Deletes are soft — entries move to the Deleted tab
+ * and can be restored or purged.
  */
 
 const GH_REPO = "filestoreapp/images";
@@ -77,6 +73,24 @@ interface LedgerFile {
   sha: string | null;
 }
 
+function normalize(raw: unknown): ExpenseEntry[] {
+  if (!Array.isArray(raw)) throw new Error("Ledger file is corrupt");
+  return raw.map((r) => {
+    const e = r as Record<string, unknown>;
+    return {
+      id: Number(e.id) || 0,
+      created_at: String(e.created_at ?? ""),
+      entry_date: String(e.entry_date ?? ""),
+      kind: (e.kind === "received" || e.kind === "spent" ? e.kind : "spent") as ExpenseKind,
+      amount: Number(e.amount) || 0,
+      note: String(e.note ?? ""),
+      added_by: String(e.added_by ?? ""),
+      deleted: e.deleted === true,
+      deleted_at: e.deleted_at ? String(e.deleted_at) : null,
+    };
+  });
+}
+
 async function readLedger(): Promise<LedgerFile> {
   const res = await ghApi(
     "GET",
@@ -86,8 +100,7 @@ async function readLedger(): Promise<LedgerFile> {
   if (!res.ok) throw new Error(`Ledger read failed (HTTP ${res.status})`);
   const data = await res.json();
   const stored = Buffer.from(data.content as string, "base64").toString("utf8");
-  const entries = JSON.parse(decryptLedger(stored)) as ExpenseEntry[];
-  if (!Array.isArray(entries)) throw new Error("Ledger file is corrupt");
+  const entries = normalize(JSON.parse(decryptLedger(stored)));
   return { entries, sha: data.sha as string };
 }
 
@@ -152,21 +165,29 @@ function todayISO(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-export async function listEntries(): Promise<ExpenseEntry[]> {
+function byDateDesc(a: ExpenseEntry, b: ExpenseEntry): number {
+  if (a.entry_date < b.entry_date) return 1;
+  if (a.entry_date > b.entry_date) return -1;
+  return Number(b.id) - Number(a.id);
+}
+
+export async function listEntries(): Promise<{
+  active: ExpenseEntry[];
+  deleted: ExpenseEntry[];
+}> {
   const { entries } = await readLedger();
-  return [...entries].sort((a, b) => {
-    if (a.entry_date < b.entry_date) return 1;
-    if (a.entry_date > b.entry_date) return -1;
-    return Number(b.id) - Number(a.id);
-  });
+  return {
+    active: entries.filter((e) => !e.deleted).sort(byDateDesc),
+    deleted: entries.filter((e) => e.deleted).sort(byDateDesc),
+  };
 }
 
 export interface NewEntry {
   kind: ExpenseKind;
   amount: number;
-  her_share: number | null;
   note: string;
   entry_date: string;
+  added_by: string;
 }
 
 export async function insertEntry(e: NewEntry): Promise<ExpenseEntry> {
@@ -176,8 +197,10 @@ export async function insertEntry(e: NewEntry): Promise<ExpenseEntry> {
     entry_date: e.entry_date || todayISO(),
     kind: e.kind,
     amount: e.amount,
-    her_share: e.her_share,
     note: e.note,
+    added_by: e.added_by,
+    deleted: false,
+    deleted_at: null,
   };
   await mutate((entries) => {
     entry.id = nextId(entries);
@@ -186,8 +209,25 @@ export async function insertEntry(e: NewEntry): Promise<ExpenseEntry> {
   return entry;
 }
 
-export async function deleteEntry(id: number): Promise<void> {
+/** Soft delete by default; permanent=true removes the entry for good. */
+export async function deleteEntry(id: number, permanent = false): Promise<void> {
+  await mutate((entries) => {
+    if (permanent) return entries.filter((e) => Number(e.id) !== Number(id));
+    const now = new Date().toISOString();
+    return entries.map((e) =>
+      Number(e.id) === Number(id)
+        ? { ...e, deleted: true, deleted_at: now }
+        : e
+    );
+  });
+}
+
+export async function restoreEntry(id: number): Promise<void> {
   await mutate((entries) =>
-    entries.filter((e) => Number(e.id) !== Number(id))
+    entries.map((e) =>
+      Number(e.id) === Number(id)
+        ? { ...e, deleted: false, deleted_at: null }
+        : e
+    )
   );
 }

@@ -17,11 +17,28 @@
   color: #6b7280;
 }
 
+.balanceCard {
+  margin-top: 24px;
+  background: #eef2ff;
+  border-color: #c7d2fe;
+  text-align: center;
+  padding: 24px 20px;
+}
+
+.balanceCard .cardLabel { color: #4338ca; }
+
+.balanceValue {
+  margin-top: 8px;
+  font-size: 40px;
+  font-weight: 800;
+  color: #312e81;
+}
+
 .cards {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
-  margin-top: 24px;
+  margin-top: 12px;
 }
 
 .card {
@@ -35,9 +52,9 @@
   border-color: #a7f3d0;
 }
 
-.amber {
-  background: #fffbeb;
-  border-color: #fde68a;
+.red {
+  background: #fef2f2;
+  border-color: #fecaca;
 }
 
 .cardLabel {
@@ -46,24 +63,39 @@
 }
 
 .green .cardLabel { color: #065f46; }
-.amber .cardLabel { color: #92400e; }
+.red .cardLabel { color: #991b1b; }
 
 .cardValue {
   margin-top: 8px;
-  font-size: 28px;
+  font-size: 24px;
   font-weight: 800;
 }
 
 .green .cardValue { color: #064e3b; }
-.amber .cardValue { color: #78350f; }
+.red .cardValue { color: #7f1d1d; }
 
-.cardHint {
-  margin-top: 4px;
-  font-size: 12px;
+.tabs {
+  display: flex;
+  gap: 8px;
+  margin-top: 24px;
 }
 
-.green .cardHint { color: #047857; }
-.amber .cardHint { color: #b45309; }
+.tab, .tabActive {
+  border: 1px solid #d1d5db;
+  border-radius: 999px;
+  padding: 8px 20px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  background: #fff;
+  color: #6b7280;
+}
+
+.tabActive {
+  background: #4f46e5;
+  border-color: #4f46e5;
+  color: #fff;
+}
 
 .panel {
   margin-top: 24px;
@@ -78,6 +110,36 @@
   font-weight: 800;
   margin: 0 0 16px;
   color: #1a1d21;
+}
+
+.seg {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.segBtn {
+  border: 2px solid #e5e7eb;
+  border-radius: 12px;
+  background: #fff;
+  padding: 12px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #6b7280;
+  cursor: pointer;
+}
+
+.segBtn.segActive.segIn {
+  border-color: #10b981;
+  background: #ecfdf5;
+  color: #065f46;
+}
+
+.segBtn.segActive.segOut {
+  border-color: #f43f5e;
+  background: #fef2f2;
+  color: #991b1b;
 }
 
 .field {
@@ -115,12 +177,6 @@
   box-shadow: 0 0 0 3px #e0e7ff;
 }
 
-.hint {
-  margin: 4px 0 0;
-  font-size: 12px;
-  color: #6b7280;
-}
-
 .btn {
   border: none;
   border-radius: 999px;
@@ -134,10 +190,6 @@
 
 .btn:hover { background: #4338ca; }
 .btn:disabled { opacity: 0.6; cursor: default; }
-
-.history {
-  margin-top: 24px;
-}
 
 .error {
   margin-top: 12px;
@@ -195,10 +247,16 @@
   flex-shrink: 0;
 }
 
-.itemAmt {
+.amtIn {
   font-size: 14px;
   font-weight: 800;
-  color: #1a1d21;
+  color: #047857;
+}
+
+.amtOut {
+  font-size: 14px;
+  font-weight: 800;
+  color: #b91c1c;
 }
 
 .del {
@@ -217,3 +275,17 @@
 }
 
 .del:disabled { opacity: 0.4; cursor: default; }
+
+.restore {
+  border: 1px solid #a7f3d0;
+  background: #ecfdf5;
+  color: #065f46;
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.restore:hover { background: #d1fae5; }
+.restore:disabled { opacity: 0.4; cursor: default; }
