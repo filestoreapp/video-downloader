@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { runPscScrapeJob } from "@/lib/worker/psc-scrape";
 import { runNewsScrapeJob } from "@/lib/worker/news-scrape";
-import { createDraftPost, publishDraftPost, deleteDraftPost, updatePost, createCategory, createQuiz, type WorkerCtx } from "@/lib/worker/digest-post";
+import { createDraftPost, publishDraftPost, deleteDraftPost, updatePost, createCategory, announcePostBySlug, createQuiz, type WorkerCtx } from "@/lib/worker/digest-post";
 
 /**
  * Backend worker for the current-affairs site, hosted on this Koyeb service.
@@ -418,6 +418,12 @@ export async function POST(req: Request) {
       const slug = String(b.slug || "").trim();
       if (!name || !slug) return NextResponse.json({ error: "name and slug are required." }, { status: 400 });
       const r = await createCategory(ctx(), name, slug);
+      return NextResponse.json({ ok: true, job, ...r });
+    }
+    if (job === "announce-post") {
+      const slug = String(body.slug || "").trim();
+      if (!slug) return NextResponse.json({ error: "slug required." }, { status: 400 });
+      const r = await announcePostBySlug(ctx(), slug);
       return NextResponse.json({ ok: true, job, ...r });
     }
     if (job === "update-post") {

@@ -425,6 +425,35 @@ export async function publishDraftPost(
   };
 }
 
+/**
+ * Send (or re-send) the Telegram channel announcement for a post by slug.
+ * Works on any status — used to announce posts that were published silently.
+ */
+export async function announcePostBySlug(ctx: WorkerCtx, slug: string) {
+  const found = await sb(
+    ctx,
+    `posts?${new URLSearchParams({ select: "title,slug,excerpt,cover_image", slug: `eq.${slug}` })}`
+  );
+  if (!found.ok) throw new Error(`Supabase read failed (${found.status})`);
+  const rows = found.data as {
+    title: string;
+    slug: string;
+    excerpt: string | null;
+    cover_image: string | null;
+  }[];
+  const post = rows[0];
+  if (!post) throw new Error(`No post found with slug "${slug}"`);
+
+  const link = `${ctx.siteUrl}${postPublicPath(post.slug)}`;
+  const caption =
+    `📢 <b>${esc(post.title)}</b>\n\n${esc(post.excerpt ?? "")}\n\n🔗 ${link}\n\n📢 Join our channel: https://t.me/Daily_CurrentAffairs_Malayalam`;
+  const tg = post.cover_image
+    ? await tgSend(ctx, "sendPhoto", { photo: post.cover_image, caption })
+    : await tgSend(ctx, "sendMessage", { text: caption });
+  if (!tg.ok) throw new Error(`Telegram send failed for "${slug}"`);
+  return { slug, announced: true as const };
+}
+
 export interface QuizQuestionInput {
   question: string;
   options: string[];
