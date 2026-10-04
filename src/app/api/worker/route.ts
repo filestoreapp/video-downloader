@@ -425,6 +425,7 @@ export async function POST(req: Request) {
         category_slug?: unknown;
         tags?: unknown;
         cover_image?: unknown;
+        published_at?: unknown;
       };
       const slug = String(b.slug || "").trim();
       if (!slug) return NextResponse.json({ error: "slug required." }, { status: 400 });
@@ -435,6 +436,7 @@ export async function POST(req: Request) {
         category_slug: b.category_slug === undefined ? undefined : String(b.category_slug),
         tags: Array.isArray(b.tags) ? (b.tags as unknown[]).map(String) : undefined,
         cover_image: b.cover_image === undefined ? undefined : String(b.cover_image),
+        published_at: b.published_at === undefined ? undefined : String(b.published_at),
       });
       return NextResponse.json({ ok: true, job, ...r });
     }

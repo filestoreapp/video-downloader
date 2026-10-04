@@ -230,6 +230,7 @@ export interface UpdatePostInput {
   category_slug?: string;
   tags?: string[];
   cover_image?: string;
+  published_at?: string;
 }
 
 /**
@@ -275,6 +276,11 @@ export async function updatePost(ctx: WorkerCtx, slug: string, input: UpdatePost
   }
   if (input.tags !== undefined) patch.tags = input.tags;
   if (input.cover_image !== undefined) patch.cover_image = input.cover_image || null;
+  if (input.published_at !== undefined && input.published_at.trim()) {
+    const d = new Date(input.published_at.trim());
+    if (isNaN(d.getTime())) throw new Error(`Invalid published_at: ${input.published_at}`);
+    patch.published_at = d.toISOString();
+  }
   if (Object.keys(patch).length === 0) throw new Error("Nothing to update.");
 
   const upd = await sb(ctx, `posts?id=eq.${post.id}`, "PATCH", patch);
