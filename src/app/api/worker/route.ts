@@ -338,7 +338,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true, job, dry_run: dryRun, ...r });
     }
     if (job === "quiz-stats") {
-      const qq = await sb(ctx(), "quizzes?select=id,slug,status,title");
+      const qq = await sb("quizzes?select=id,slug,status,title");
       const quizzes = (qq.ok && Array.isArray(qq.data) ? qq.data : []) as {
         id: string; slug: string; status: string; title: string;
       }[];
@@ -346,7 +346,6 @@ export async function POST(req: Request) {
       const perQuiz: { slug: string; status: string; questions: number }[] = [];
       for (const qz of quizzes) {
         const qc = await sb(
-          ctx(),
           `quiz_questions?${new URLSearchParams({ select: "id", quiz_id: `eq.${qz.id}` })}`
         );
         const n = qc.ok && Array.isArray(qc.data) ? qc.data.length : 0;
