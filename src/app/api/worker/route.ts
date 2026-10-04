@@ -337,6 +337,26 @@ export async function POST(req: Request) {
       const r = await jobPublishQuiz(slug, dryRun);
       return NextResponse.json({ ok: true, job, dry_run: dryRun, ...r });
     }
+    if (job === "quiz-stats") {
+      const qq = await sb(ctx(), "quizzes?select=id,slug,status,title");
+      const quizzes = (qq.ok && Array.isArray(qq.data) ? qq.data : []) as {
+        id: string; slug: string; status: string; title: string;
+      }[];
+      let total = 0;
+      const perQuiz: { slug: string; status: string; questions: number }[] = [];
+      for (const qz of quizzes) {
+        const qc = await sb(
+          ctx(),
+          `quiz_questions?${new URLSearchParams({ select: "id", quiz_id: `eq.${qz.id}` })}`
+        );
+        const n = qc.ok && Array.isArray(qc.data) ? qc.data.length : 0;
+        total += n;
+        perQuiz.push({ slug: qz.slug, status: qz.status, questions: n });
+      }
+      return NextResponse.json({
+        ok: true, job, quiz_count: quizzes.length, total_questions: total, per_quiz: perQuiz,
+      });
+    }
     if (job === "psc-scrape") {
       if (!TG_TOKEN) {
         return NextResponse.json({ error: "Worker not configured (Telegram)." }, { status: 503 });
