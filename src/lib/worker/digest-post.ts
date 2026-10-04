@@ -268,7 +268,31 @@ export async function updatePost(ctx: WorkerCtx, slug: string, input: UpdatePost
   ]);
   return { slug: post.slug, updated: true as const, revalidated };
 }
-async function makeDigestThumbnail(dateLong: string): Promise<Buffer> {
+/** Word-wrap a title into up to 3 SVG text lines (max ~20 chars each). */
+function wrapTitle(title: string): string[] {
+  const words = title.replace(/^(Kerala PSC\s*[:-]?\s*)/i, "").split(/\s+/);
+  const lines: string[] = [];
+  let cur = "";
+  for (const w of words) {
+    if ((cur + " " + w).trim().length > 20) {
+      if (cur) lines.push(cur.trim());
+      cur = w;
+      if (lines.length === 2) break;
+    } else {
+      cur = (cur + " " + w).trim();
+    }
+  }
+  if (cur && lines.length < 3) lines.push(cur.trim());
+  return lines.slice(0, 3).map((l) => l.toUpperCase());
+}
+
+async function makeDigestThumbnail(dateLong: string, title?: string): Promise<Buffer> {
+  const titleLines = title ? wrapTitle(title) : [];
+  const heading = titleLines.length
+    ? titleLines
+        .map((l, i) => `<text x="80" y="${200 + i * 95}" font-family="Verdana, Geneva, sans-serif" font-size="64" font-weight="bold" fill="#ffffff" letter-spacing="2">${esc(l)}</text>`)
+        .join("\n")
+    : `<text x="80" y="230" font-family="Verdana, Geneva, sans-serif" font-size="92" font-weight="bold" fill="#ffffff" letter-spacing="2">DAILY CURRENT</text>\n<text x="80" y="330" font-family="Verdana, Geneva, sans-serif" font-size="92" font-weight="bold" fill="#ffffff" letter-spacing="2">AFFAIRS</text>\n<text x="80" y="420" font-family="Verdana, Geneva, sans-serif" font-size="44" fill="#fbbf24">${esc(dateLong)}</text>`;
   const svg = `<svg width="1200" height="630" xmlns="http://www.w3.org/2000/svg">
 <defs>
 <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
@@ -279,10 +303,8 @@ async function makeDigestThumbnail(dateLong: string): Promise<Buffer> {
 <circle cx="1050" cy="90" r="220" fill="#ffffff" opacity="0.06"/>
 <circle cx="120" cy="580" r="160" fill="#ffffff" opacity="0.05"/>
 <rect x="80" y="120" width="72" height="10" rx="5" fill="#fbbf24"/>
-<text x="80" y="230" font-family="Verdana, Geneva, sans-serif" font-size="92" font-weight="bold" fill="#ffffff" letter-spacing="2">DAILY CURRENT</text>
-<text x="80" y="330" font-family="Verdana, Geneva, sans-serif" font-size="92" font-weight="bold" fill="#ffffff" letter-spacing="2">AFFAIRS</text>
-<text x="80" y="420" font-family="Verdana, Geneva, sans-serif" font-size="44" fill="#fbbf24">${esc(dateLong)}</text>
-<text x="80" y="500" font-family="Verdana, Geneva, sans-serif" font-size="30" fill="#d1fae5">Kerala PSC • currentaffairsweb</text>
+${heading}
+<text x="80" y="500" font-family="Verdana, Geneva, sans-serif" font-size="30" fill="#d1fae5">Kerala PSC • psccurrentaffairs.online</text>
 </svg>`;
   const png = await sharp(Buffer.from(svg)).png().toBuffer();
   return compressImage(png);
@@ -290,9 +312,14 @@ async function makeDigestThumbnail(dateLong: string): Promise<Buffer> {
 
 /**
  * Publish a draft post by slug: generate+upload the branded thumbnail,
- * flip to published, announce on Telegram, revalidate the site.
+ * flip to published, announce on Telegram (unless opts.skipTelegram),
+ * revalidate the site.
  */
-export async function publishDraftPost(ctx: WorkerCtx, slug: string) {
+export async function publishDraftPost(
+  ctx: WorkerCtx,
+  slug: string,
+  opts?: { skipTelegram?: boolean; thumbnailTitle?: string }
+) {
   const found = await sb(
     ctx,
     `posts?${new URLSearchParams({ select: "id,title,slug,excerpt,cover_image,status", slug: `eq.${slug}` })}`
@@ -316,11 +343,13 @@ export async function publishDraftPost(ctx: WorkerCtx, slug: string) {
   }
 
   // Branded thumbnail (best-effort: publish anyway if generation fails).
+  // Evergreen/silent publishes pass thumbnailTitle for a title-based card;
+  // the daily digest keeps its classic DAILY CURRENT AFFAIRS card.
   let coverImage = post.cover_image;
   let thumbNote = "";
   if (!coverImage) {
     try {
-      const buf = await makeDigestThumbnail(istDateLong());
+      const buf = await makeDigestThumbnail(istDateLong(), opts?.thumbnailTitle || undefined);
       coverImage = await uploadToImageCdn(buf, `auto-thumbnails/${slug}.webp`, { upsert: true });
     } catch (err) {
       thumbNote = ` (thumbnail failed: ${err instanceof Error ? err.message.slice(0, 80) : "error"})`;
@@ -337,9 +366,15 @@ export async function publishDraftPost(ctx: WorkerCtx, slug: string) {
   const link = `${ctx.siteUrl}${postPublicPath(post.slug)}`;
   const caption =
     `📢 <b>${esc(post.title)}</b>\n\n${esc(post.excerpt ?? "")}\n\n🔗 ${link}\n\n📢 Join our channel: https://t.me/Daily_CurrentAffairs_Malayalam`;
-  const tg = coverImage
-    ? await tgSend(ctx, "sendPhoto", { photo: coverImage, caption })
-    : await tgSend(ctx, "sendMessage", { text: caption });
+  let tgNote = "";
+  if (opts?.skipTelegram) {
+    tgNote = " (telegram skipped)";
+  } else {
+    const tg = coverImage
+      ? await tgSend(ctx, "sendPhoto", { photo: coverImage, caption })
+      : await tgSend(ctx, "sendMessage", { text: caption });
+    if (!tg.ok) tgNote = " (telegram FAILED)";
+  }
 
   const revalidated = await revalidate(ctx, [
     `/current-affairs/${post.slug}`,
@@ -349,7 +384,7 @@ export async function publishDraftPost(ctx: WorkerCtx, slug: string) {
   return {
     slug,
     already: false as const,
-    published: [`${slug}${tg.ok ? "" : " (telegram FAILED)"}${thumbNote}`],
+    published: [`${slug}${tgNote}${thumbNote}`],
     revalidated,
   };
 }

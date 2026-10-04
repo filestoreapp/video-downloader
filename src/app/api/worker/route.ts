@@ -380,9 +380,15 @@ export async function POST(req: Request) {
       if (!TG_TOKEN) {
         return NextResponse.json({ error: "Worker not configured (Telegram)." }, { status: 503 });
       }
-      const slug = String(body.slug || "").trim();
+      const b = body as { slug?: unknown; skip_telegram?: unknown; thumbnail_title?: unknown };
+      const slug = String(b.slug || "").trim();
       if (!slug) return NextResponse.json({ error: "slug required." }, { status: 400 });
-      const r = await publishDraftPost(ctx(), slug);
+      const r = await publishDraftPost(ctx(), slug, {
+        skipTelegram: b.skip_telegram === true,
+        thumbnailTitle: typeof b.thumbnail_title === "string" && b.thumbnail_title.trim()
+          ? b.thumbnail_title.trim()
+          : undefined,
+      });
       return NextResponse.json({ ok: true, job, ...r });
     }
     if (job === "delete-post") {
