@@ -12,6 +12,14 @@
 import sharp from "sharp";
 import { compressImage, uploadToImageCdn } from "./image-pipeline";
 
+/** Freedom-fighter series posts live at clean top-level URLs (no /current-affairs/ prefix). */
+function postPublicPath(slug: string): string {
+  return slug === "indian-freedom-fighters" || slug.startsWith("freedom-fighter-")
+    ? `/${slug}`
+    : `/current-affairs/${slug}`;
+}
+
+
 export interface WorkerCtx {
   sbUrl: string;
   sbKey: string;
@@ -326,7 +334,7 @@ export async function publishDraftPost(ctx: WorkerCtx, slug: string) {
   });
   if (!upd.ok) throw new Error(`Publish flip failed (${upd.status})`);
 
-  const link = `${ctx.siteUrl}/current-affairs/${post.slug}`;
+  const link = `${ctx.siteUrl}${postPublicPath(post.slug)}`;
   const caption =
     `📢 <b>${esc(post.title)}</b>\n\n${esc(post.excerpt ?? "")}\n\n🔗 ${link}\n\n📢 Join our channel: https://t.me/Daily_CurrentAffairs_Malayalam`;
   const tg = coverImage
