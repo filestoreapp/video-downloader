@@ -367,6 +367,8 @@ export async function POST(req: Request) {
         content_html?: unknown;
         category_slug?: unknown;
         tags?: unknown;
+        status?: unknown;
+        published_at?: unknown;
       };
       const title = String(b.title || "").trim();
       const slug = String(b.slug || "").trim();
@@ -384,6 +386,8 @@ export async function POST(req: Request) {
         content_html,
         category_slug: String(b.category_slug || "currentaffairs"),
         tags: Array.isArray(b.tags) ? b.tags.map(String) : ["daily-digest"],
+        status: b.status === "scheduled" ? "scheduled" : "draft",
+        published_at: typeof b.published_at === "string" ? b.published_at : undefined,
       });
       return NextResponse.json({ ok: true, job, ...r });
     }

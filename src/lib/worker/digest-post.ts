@@ -125,6 +125,8 @@ export interface CreatePostInput {
   content_html: string;
   category_slug?: string;
   tags?: string[];
+  status?: "draft" | "scheduled";
+  published_at?: string;
 }
 
 /**
@@ -155,6 +157,14 @@ export async function createDraftPost(ctx: WorkerCtx, input: CreatePostInput) {
     if (cats.length > 0) category_id = cats[0].id;
   }
 
+  const status = input.status === "scheduled" ? "scheduled" : "draft";
+  let published_at: string | null = null;
+  if (status === "scheduled" && input.published_at) {
+    const d = new Date(input.published_at);
+    if (isNaN(d.getTime())) throw new Error(`Invalid published_at: ${input.published_at}`);
+    published_at = d.toISOString();
+  }
+
   const ins = await sb(ctx, "posts", "POST", {
     title: input.title,
     slug,
@@ -165,8 +175,8 @@ export async function createDraftPost(ctx: WorkerCtx, input: CreatePostInput) {
     cover_image: null,
     category_id,
     tags: input.tags || [],
-    status: "draft",
-    published_at: null,
+    status,
+    published_at,
     meta_title: input.title,
     meta_description: input.excerpt || null,
     author_id: null,
@@ -179,7 +189,7 @@ export async function createDraftPost(ctx: WorkerCtx, input: CreatePostInput) {
     throw new Error(`Post insert failed (${ins.status}): ${JSON.stringify(ins.data).slice(0, 200)}`);
   }
   const created = (ins.data as { id: string }[])[0];
-  return { id: created.id, slug, status: "draft", already: false as const };
+  return { id: created.id, slug, status, already: false as const };
 }
 
 /**
