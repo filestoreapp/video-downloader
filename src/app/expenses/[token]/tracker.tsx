@@ -23,6 +23,24 @@ const KIND_OPTIONS: { value: ExpenseKind; label: string }[] = [
   { value: "spent", label: "Money spent" },
 ];
 
+const PAGE_SIZE = 10;
+
+function pageNumbers(cur: number, total: number): (number | "…")[] {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const keep = new Set(
+    [1, 2, cur - 1, cur, cur + 1, total - 1, total].filter(
+      (n) => n >= 1 && n <= total
+    )
+  );
+  const arr = [...keep].sort((a, b) => a - b);
+  const out: (number | "…")[] = [];
+  arr.forEach((n, i) => {
+    if (i > 0 && n - (arr[i - 1] as number) > 1) out.push("…");
+    out.push(n);
+  });
+  return out;
+}
+
 export default function Tracker({
   token,
   friendName,
@@ -34,6 +52,7 @@ export default function Tracker({
   const [deleted, setDeleted] = useState<ExpenseEntry[]>([]);
   const [summary, setSummary] = useState<ExpenseSummary | null>(null);
   const [tab, setTab] = useState<"entries" | "deleted">("entries");
+  const [page, setPage] = useState(1);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -169,6 +188,17 @@ export default function Tracker({
   };
 
   const showing = tab === "entries" ? entries : deleted;
+  const totalPages = Math.max(1, Math.ceil(showing.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const pageItems = showing.slice(
+    (safePage - 1) * PAGE_SIZE,
+    safePage * PAGE_SIZE
+  );
+
+  const switchTab = (t: "entries" | "deleted") => {
+    setTab(t);
+    setPage(1);
+  };
 
   return (
     <div className={styles.wrap}>
@@ -201,14 +231,14 @@ export default function Tracker({
         <button
           type="button"
           className={tab === "entries" ? styles.tabActive : styles.tab}
-          onClick={() => setTab("entries")}
+          onClick={() => switchTab("entries")}
         >
           Entries ({entries.length})
         </button>
         <button
           type="button"
           className={tab === "deleted" ? styles.tabActive : styles.tab}
-          onClick={() => setTab("deleted")}
+          onClick={() => switchTab("deleted")}
         >
           Deleted ({deleted.length})
         </button>
@@ -225,7 +255,7 @@ export default function Tracker({
       )}
 
       <ul className={styles.list}>
-        {showing.map((e) => (
+        {pageItems.map((e) => (
           <li key={e.id} className={styles.item}>
             <div className={styles.itemMain}>
               <div className={styles.itemTitle}>
@@ -280,6 +310,47 @@ export default function Tracker({
           </li>
         ))}
       </ul>
+
+      {totalPages > 1 && (
+        <div className={styles.pager}>
+          <button
+            type="button"
+            className={styles.pageBtn}
+            disabled={safePage <= 1}
+            onClick={() => setPage(safePage - 1)}
+            aria-label="Previous page"
+          >
+            ‹ Prev
+          </button>
+          {pageNumbers(safePage, totalPages).map((n, i) =>
+            n === "…" ? (
+              <span key={`e${i}`} className={styles.pageEllipsis}>
+                …
+              </span>
+            ) : (
+              <button
+                key={n}
+                type="button"
+                className={
+                  n === safePage ? styles.pageBtnActive : styles.pageBtn
+                }
+                onClick={() => setPage(n)}
+              >
+                {n}
+              </button>
+            )
+          )}
+          <button
+            type="button"
+            className={styles.pageBtn}
+            disabled={safePage >= totalPages}
+            onClick={() => setPage(safePage + 1)}
+            aria-label="Next page"
+          >
+            Next ›
+          </button>
+        </div>
+      )}
 
       <form onSubmit={submit} className={styles.panel}>
         <h2 className={styles.h2}>＋ Add entry</h2>
