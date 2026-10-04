@@ -203,6 +203,26 @@ export async function deleteDraftPost(ctx: WorkerCtx, slug: string) {
   return { slug, deleted: true as const };
 }
 
+/**
+ * Create a category (idempotent on slug). Returns the category id and slug.
+ */
+export async function createCategory(ctx: WorkerCtx, name: string, slug: string) {
+  const found = await sb(
+    ctx,
+    `categories?${new URLSearchParams({ select: "id,slug", slug: `eq.${slug}` })}`
+  );
+  if (found.ok) {
+    const rows = found.data as { id: string; slug: string }[];
+    if (rows.length > 0) return { id: rows[0].id, slug: rows[0].slug, created: false as const };
+  }
+  const ins = await sb(ctx, "categories", "POST", { name, slug });
+  if (!ins.ok)
+    throw new Error(`Category insert failed (${ins.status}): ${JSON.stringify(ins.data).slice(0, 200)}`);
+  const rows = ins.data as { id: string; slug: string }[];
+  if (!rows || rows.length === 0) throw new Error("Category insert returned no row.");
+  return { id: rows[0].id, slug: rows[0].slug, created: true as const };
+}
+
 export interface UpdatePostInput {
   title?: string;
   excerpt?: string;
