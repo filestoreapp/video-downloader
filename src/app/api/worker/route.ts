@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { runPscScrapeJob } from "@/lib/worker/psc-scrape";
 import { runNewsScrapeJob } from "@/lib/worker/news-scrape";
-import { createDraftPost, publishDraftPost, deleteDraftPost, createQuiz, type WorkerCtx } from "@/lib/worker/digest-post";
+import { createDraftPost, publishDraftPost, deleteDraftPost, updatePost, createQuiz, type WorkerCtx } from "@/lib/worker/digest-post";
 
 /**
  * Backend worker for the current-affairs site, hosted on this Koyeb service.
@@ -10,7 +10,7 @@ import { createDraftPost, publishDraftPost, deleteDraftPost, createQuiz, type Wo
  *   Authorization: Bearer <WORKER_SECRET>
  *   { "job": "publish-due-posts" | "publish-quiz" | "psc-scrape"
  *     | "news-scrape" | "create-post" | "publish-post" | "delete-post"
- *     | "create-quiz",
+ *     | "update-post" | "create-quiz",
  *     "slug"?: string, "dry_run"?: boolean,
  *     // create-post only: title, excerpt, content_html, category_slug, tags
  *     // create-quiz only: title, slug, description, post_slug,
@@ -61,10 +61,9 @@ const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 const TG_CHANNEL =
   process.env.TELEGRAM_CHANNEL_ID || "@Daily_CurrentAffairs_Malayalam";
-// Canonical site URL pinned to the custom domain (2026-10-02): the Koyeb
-// CA_SITE_URL env var still holds the old vercel.app URL. Revert to
-// env-based if the env var is ever updated in the Koyeb dashboard.
-const SITE_URL = "https://www.psccurrentaffairs.online";
+const SITE_URL = (
+  process.env.CA_SITE_URL || "https://currentaffairsweb.vercel.app"
+).replace(/\/+$/, "");
 const REVALIDATE_URL = process.env.CA_REVALIDATE_URL || "";
 const REVALIDATE_SECRET = process.env.CA_REVALIDATE_SECRET || "";
 
@@ -392,6 +391,26 @@ export async function POST(req: Request) {
       const r = await deleteDraftPost(ctx(), slug);
       return NextResponse.json({ ok: true, job, ...r });
     }
+    if (job === "update-post") {
+      const b = body as {
+        slug?: unknown;
+        title?: unknown;
+        excerpt?: unknown;
+        content_html?: unknown;
+        category_slug?: unknown;
+        tags?: unknown;
+      };
+      const slug = String(b.slug || "").trim();
+      if (!slug) return NextResponse.json({ error: "slug required." }, { status: 400 });
+      const r = await updatePost(ctx(), slug, {
+        title: b.title === undefined ? undefined : String(b.title),
+        excerpt: b.excerpt === undefined ? undefined : String(b.excerpt),
+        content_html: b.content_html === undefined ? undefined : String(b.content_html),
+        category_slug: b.category_slug === undefined ? undefined : String(b.category_slug),
+        tags: Array.isArray(b.tags) ? (b.tags as unknown[]).map(String) : undefined,
+      });
+      return NextResponse.json({ ok: true, job, ...r });
+    }
     if (job === "create-quiz") {
       const b = body as {
         title?: unknown;
@@ -434,105 +453,8 @@ export async function POST(req: Request) {
       });
       return NextResponse.json({ ok: true, job, ...r });
     }
-    if (job === "fill-exam") {
-      const b = body as { slug?: unknown; fields?: unknown };
-      const examSlug = String(b.slug || "").trim().toLowerCase();
-      if (!examSlug) {
-        return NextResponse.json({ error: "slug required." }, { status: 400 });
-      }
-      const ALLOWED = new Set([
-        "category_no",
-        "question_paper_code",
-        "notification_pdf_key",
-        "question_paper_pdf_key",
-        "qualification",
-        "age_limit",
-        "pay_scale",
-        "vacancy",
-        "notification_date",
-        "admit_card_date",
-        "exam_date",
-        "result_date",
-        "status",
-        "department",
-        "description",
-        "is_published",
-      ]);
-      const existing = await sb(
-        `exams?${new URLSearchParams({ select: "*", slug: `eq.${examSlug}`, limit: "1" })}`
-      );
-      const rows = Array.isArray(existing.data) ? existing.data : [];
-      if (rows.length === 0) {
-        return NextResponse.json(
-          { ok: false, job, slug: examSlug, error: "exam not found" },
-          { status: 404 }
-        );
-      }
-      const columns = Object.keys(rows[0] as Record<string, unknown>);
-      const fields = (b.fields || {}) as Record<string, unknown>;
-      const row: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(fields)) {
-        if (!ALLOWED.has(k)) continue;
-        row[k] = typeof v === "string" && v.trim() === "" ? null : v;
-      }
-      if (dryRun || Object.keys(row).length === 0) {
-        return NextResponse.json({
-          ok: true,
-          job,
-          slug: examSlug,
-          dry_run: true,
-          columns,
-          proposed: row,
-        });
-      }
-      const upd = await sb(
-        `exams?${new URLSearchParams({ slug: `eq.${examSlug}` })}`,
-        "PATCH",
-        row
-      );
-      if (!upd.ok) {
-        return NextResponse.json(
-          {
-            ok: false,
-            job,
-            slug: examSlug,
-            columns,
-            updateStatus: upd.status,
-            updateError: upd.data,
-          },
-          { status: 502 }
-        );
-      }
-      // Best-effort ISR revalidation (pages also refresh on their 5-min timer).
-      let revalidated = false;
-      try {
-        const c = ctx();
-        if (c.revalidateUrl && c.revalidateSecret) {
-          const rr = await fetch(c.revalidateUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              secret: c.revalidateSecret,
-              paths: ["/exams", `/exams/${examSlug}`],
-            }),
-            signal: AbortSignal.timeout(15000),
-          });
-          revalidated = rr.ok;
-        }
-      } catch {
-        /* non-fatal */
-      }
-      return NextResponse.json({
-        ok: true,
-        job,
-        slug: examSlug,
-        columns,
-        updated: row,
-        revalidated,
-      });
-    }
     return NextResponse.json(
-      { error: "Unknown job. Use publish-due-posts, publish-quiz, psc-scrape, news-scrape, create-post, publish-post, delete-post, create-quiz, or fill-exam." },
+      { error: "Unknown job. Use publish-due-posts, publish-quiz, psc-scrape, news-scrape, create-post, publish-post, delete-post, or create-quiz." },
       { status: 400 }
     );
   } catch (err) {

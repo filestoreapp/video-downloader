@@ -194,6 +194,70 @@ export async function deleteDraftPost(ctx: WorkerCtx, slug: string) {
   if (!del.ok) throw new Error(`Delete failed (${del.status})`);
   return { slug, deleted: true as const };
 }
+
+export interface UpdatePostInput {
+  title?: string;
+  excerpt?: string;
+  content_html?: string;
+  category_slug?: string;
+  tags?: string[];
+}
+
+/**
+ * Update a post's content fields by slug (any status — draft, scheduled or
+ * published). Used to revise posts without the admin panel, e.g. translating
+ * an already-published post. Revalidates the site's affected paths.
+ */
+export async function updatePost(ctx: WorkerCtx, slug: string, input: UpdatePostInput) {
+  const found = await sb(
+    ctx,
+    `posts?${new URLSearchParams({ select: "id,slug,status", slug: `eq.${slug}` })}`
+  );
+  if (!found.ok) throw new Error(`Supabase read failed (${found.status})`);
+  const rows = found.data as { id: string; slug: string; status: string }[];
+  const post = rows[0];
+  if (!post) throw new Error(`No post found with slug "${slug}"`);
+
+  const patch: Record<string, unknown> = {};
+  if (input.title !== undefined && input.title.trim()) {
+    patch.title = input.title.trim();
+    patch.meta_title = input.title.trim();
+  }
+  if (input.excerpt !== undefined) {
+    patch.excerpt = input.excerpt || null;
+    patch.meta_description = input.excerpt || null;
+  }
+  if (input.content_html !== undefined && input.content_html.trim()) {
+    patch.content_html = input.content_html;
+    patch.content_markdown = null;
+    patch.editor_mode = "richtext";
+  }
+  if (input.category_slug !== undefined) {
+    let category_id: string | null = null;
+    if (input.category_slug) {
+      const cat = await sb(
+        ctx,
+        `categories?${new URLSearchParams({ select: "id", slug: `eq.${input.category_slug}` })}`
+      );
+      const cats = (cat.ok ? cat.data : []) as { id: string }[];
+      if (cats.length > 0) category_id = cats[0].id;
+    }
+    patch.category_id = category_id;
+  }
+  if (input.tags !== undefined) patch.tags = input.tags;
+  if (Object.keys(patch).length === 0) throw new Error("Nothing to update.");
+
+  const upd = await sb(ctx, `posts?id=eq.${post.id}`, "PATCH", patch);
+  if (!upd.ok)
+    throw new Error(`Update failed (${upd.status}): ${JSON.stringify(upd.data).slice(0, 200)}`);
+
+  const revalidated = await revalidate(ctx, [
+    `/current-affairs/${post.slug}`,
+    "/current-affairs",
+    "/",
+  ]);
+  return { slug: post.slug, updated: true as const, revalidated };
+}
 async function makeDigestThumbnail(dateLong: string): Promise<Buffer> {
   const svg = `<svg width="1200" height="630" xmlns="http://www.w3.org/2000/svg">
 <defs>
@@ -208,7 +272,7 @@ async function makeDigestThumbnail(dateLong: string): Promise<Buffer> {
 <text x="80" y="230" font-family="Verdana, Geneva, sans-serif" font-size="92" font-weight="bold" fill="#ffffff" letter-spacing="2">DAILY CURRENT</text>
 <text x="80" y="330" font-family="Verdana, Geneva, sans-serif" font-size="92" font-weight="bold" fill="#ffffff" letter-spacing="2">AFFAIRS</text>
 <text x="80" y="420" font-family="Verdana, Geneva, sans-serif" font-size="44" fill="#fbbf24">${esc(dateLong)}</text>
-<text x="80" y="500" font-family="Verdana, Geneva, sans-serif" font-size="30" fill="#d1fae5">Kerala PSC • psccurrentaffairs.online</text>
+<text x="80" y="500" font-family="Verdana, Geneva, sans-serif" font-size="30" fill="#d1fae5">Kerala PSC • currentaffairsweb</text>
 </svg>`;
   const png = await sharp(Buffer.from(svg)).png().toBuffer();
   return compressImage(png);
