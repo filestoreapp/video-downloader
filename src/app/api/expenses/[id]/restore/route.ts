@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getExpenseToken } from "@/lib/expenses";
-import { deleteEntry } from "@/lib/expense-db";
+import { restoreEntry } from "@/lib/expense-db";
 
 export const dynamic = "force-dynamic";
 
@@ -8,11 +8,8 @@ function authorized(req: NextRequest): boolean {
   return req.headers.get("x-expense-token") === getExpenseToken();
 }
 
-/**
- * DELETE /api/expenses/[id] — soft delete (moves to the Deleted tab).
- * DELETE /api/expenses/[id]?permanent=1 — delete forever.
- */
-export async function DELETE(
+/** POST /api/expenses/[id]/restore — bring a deleted entry back. */
+export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -24,13 +21,12 @@ export async function DELETE(
   if (!Number.isInteger(entryId) || entryId <= 0) {
     return NextResponse.json({ error: "Invalid id." }, { status: 400 });
   }
-  const permanent = req.nextUrl.searchParams.get("permanent") === "1";
   try {
-    await deleteEntry(entryId, permanent);
+    await restoreEntry(entryId);
     return NextResponse.json({ ok: true });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Delete failed." },
+      { error: err instanceof Error ? err.message : "Restore failed." },
       { status: 500 }
     );
   }
