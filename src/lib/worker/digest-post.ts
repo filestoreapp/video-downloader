@@ -201,6 +201,7 @@ export interface UpdatePostInput {
   content_html?: string;
   category_slug?: string;
   tags?: string[];
+  cover_image?: string;
 }
 
 /**
@@ -245,6 +246,7 @@ export async function updatePost(ctx: WorkerCtx, slug: string, input: UpdatePost
     patch.category_id = category_id;
   }
   if (input.tags !== undefined) patch.tags = input.tags;
+  if (input.cover_image !== undefined) patch.cover_image = input.cover_image || null;
   if (Object.keys(patch).length === 0) throw new Error("Nothing to update.");
 
   const upd = await sb(ctx, `posts?id=eq.${post.id}`, "PATCH", patch);
