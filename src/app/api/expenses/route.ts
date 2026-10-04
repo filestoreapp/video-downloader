@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getExpenseToken, EXPENSE_KINDS, summarize } from "@/lib/expenses";
-import { listEntries, insertEntry } from "@/lib/expense-db";
+import { listEntries, insertEntry } from "@/lib/sheet-db";
 import type { ExpenseKind } from "@/lib/expenses";
 
 export const dynamic = "force-dynamic";
