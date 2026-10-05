@@ -62,7 +62,7 @@ const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 const TG_CHANNEL =
   process.env.TELEGRAM_CHANNEL_ID || "@Daily_CurrentAffairs_Malayalam";
 const SITE_URL = (
-  process.env.CA_SITE_URL || "https://currentaffairsweb.vercel.app"
+  process.env.CA_SITE_URL || "https://www.psccurrentaffairs.online"
 ).replace(/\/+$/, "");
 const REVALIDATE_URL = process.env.CA_REVALIDATE_URL || "";
 const REVALIDATE_SECRET = process.env.CA_REVALIDATE_SECRET || "";
