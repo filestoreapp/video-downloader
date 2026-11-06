@@ -470,6 +470,10 @@ export interface CreateQuizInput {
   category_slug?: string;
   difficulty?: string;
   time_limit_seconds?: number | null;
+  /** Mock test: sets quizzes.is_mock so the quiz lists on /mock-tests. */
+  is_mock?: boolean;
+  /** Negative marking per wrong answer (e.g. 0.25). Only meaningful with is_mock. */
+  negative_marking?: number;
   questions: QuizQuestionInput[];
   status?: "draft" | "published";
 }
@@ -541,9 +545,9 @@ export async function createQuiz(ctx: WorkerCtx, input: CreateQuizInput) {
     category_id,
     difficulty: input.difficulty || "medium",
     time_limit_seconds: input.time_limit_seconds ?? null,
-    is_mock: false,
+    is_mock: input.is_mock === true,
     is_pyq: false,
-    negative_marking: 0,
+    negative_marking: input.negative_marking || 0,
     status,
   });
   if (!ins.ok) {
@@ -572,6 +576,8 @@ export async function createQuiz(ctx: WorkerCtx, input: CreateQuizInput) {
     );
   }
 
-  const revalidated = await revalidate(ctx, ["/quiz", `/quiz/${slug}`]);
+  const paths = ["/quiz", `/quiz/${slug}`];
+  if (input.is_mock === true) paths.push("/mock-tests", `/mock-tests/${slug}`);
+  const revalidated = await revalidate(ctx, paths);
   return { id: quizId, slug, status, already: false as const, questions: qrows.length, revalidated };
 }

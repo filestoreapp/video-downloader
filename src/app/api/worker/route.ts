@@ -478,6 +478,8 @@ export async function POST(req: Request) {
         category_slug?: unknown;
         difficulty?: unknown;
         time_limit_seconds?: unknown;
+        is_mock?: unknown;
+        negative_marking?: unknown;
         questions?: unknown;
         status?: unknown;
       };
@@ -493,6 +495,11 @@ export async function POST(req: Request) {
           b.time_limit_seconds === null || b.time_limit_seconds === undefined
             ? null
             : Number(b.time_limit_seconds),
+        is_mock: b.is_mock === true,
+        negative_marking:
+          b.negative_marking === null || b.negative_marking === undefined
+            ? 0
+            : Number(b.negative_marking),
         questions: questions.map((q) => {
           const qq = q as {
             question?: unknown;
