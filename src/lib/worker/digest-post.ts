@@ -474,6 +474,8 @@ export interface CreateQuizInput {
   is_mock?: boolean;
   /** Negative marking per wrong answer (e.g. 0.25). Only meaningful with is_mock. */
   negative_marking?: number;
+  /** Exam hub slug — resolved to quizzes.exam_slug so the quiz lists on /exams/<slug>. */
+  exam_slug?: string;
   questions: QuizQuestionInput[];
   status?: "draft" | "published";
 }
@@ -543,6 +545,7 @@ export async function createQuiz(ctx: WorkerCtx, input: CreateQuizInput) {
     description: input.description || null,
     post_id,
     category_id,
+    exam_slug: input.exam_slug?.trim() || null,
     difficulty: input.difficulty || "medium",
     time_limit_seconds: input.time_limit_seconds ?? null,
     is_mock: input.is_mock === true,
@@ -578,6 +581,7 @@ export async function createQuiz(ctx: WorkerCtx, input: CreateQuizInput) {
 
   const paths = ["/quiz", `/quiz/${slug}`];
   if (input.is_mock === true) paths.push("/mock-tests", `/mock-tests/${slug}`);
+  if (input.exam_slug?.trim()) paths.push(`/exams/${input.exam_slug.trim()}`);
   const revalidated = await revalidate(ctx, paths);
   return { id: quizId, slug, status, already: false as const, questions: qrows.length, revalidated };
 }
