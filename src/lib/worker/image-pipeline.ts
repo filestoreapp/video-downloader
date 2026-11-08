@@ -9,6 +9,7 @@
  * images repo only).
  */
 import sharp from "sharp";
+import "./fontconfig";
 
 const REPO = "filestoreapp/images";
 const BRANCH = "main";
