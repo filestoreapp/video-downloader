@@ -11,6 +11,7 @@
  */
 import sharp from "sharp";
 import { compressImage, uploadToImageCdn } from "./image-pipeline";
+import "./fontconfig";
 
 /** Freedom-fighter series posts live at clean top-level URLs (no /current-affairs/ prefix). */
 function postPublicPath(slug: string): string {
@@ -326,9 +327,9 @@ async function makeDigestThumbnail(dateLong: string, title?: string): Promise<Bu
   const titleLines = title ? wrapTitle(title) : [];
   const heading = titleLines.length
     ? titleLines
-        .map((l, i) => `<text x="80" y="${200 + i * 95}" font-family="Verdana, Geneva, sans-serif" font-size="64" font-weight="bold" fill="#ffffff" letter-spacing="2">${esc(l)}</text>`)
+        .map((l, i) => `<text x="80" y="${200 + i * 95}" font-family="Verdana, 'Noto Sans Malayalam', Geneva, sans-serif" font-size="64" font-weight="bold" fill="#ffffff" letter-spacing="2">${esc(l)}</text>`)
         .join("\n")
-    : `<text x="80" y="230" font-family="Verdana, Geneva, sans-serif" font-size="92" font-weight="bold" fill="#ffffff" letter-spacing="2">DAILY CURRENT</text>\n<text x="80" y="330" font-family="Verdana, Geneva, sans-serif" font-size="92" font-weight="bold" fill="#ffffff" letter-spacing="2">AFFAIRS</text>\n<text x="80" y="420" font-family="Verdana, Geneva, sans-serif" font-size="44" fill="#fbbf24">${esc(dateLong)}</text>`;
+    : `<text x="80" y="230" font-family="Verdana, 'Noto Sans Malayalam', Geneva, sans-serif" font-size="92" font-weight="bold" fill="#ffffff" letter-spacing="2">DAILY CURRENT</text>\n<text x="80" y="330" font-family="Verdana, 'Noto Sans Malayalam', Geneva, sans-serif" font-size="92" font-weight="bold" fill="#ffffff" letter-spacing="2">AFFAIRS</text>\n<text x="80" y="420" font-family="Verdana, 'Noto Sans Malayalam', Geneva, sans-serif" font-size="44" fill="#fbbf24">${esc(dateLong)}</text>`;
   const svg = `<svg width="1200" height="630" xmlns="http://www.w3.org/2000/svg">
 <defs>
 <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
@@ -340,7 +341,7 @@ async function makeDigestThumbnail(dateLong: string, title?: string): Promise<Bu
 <circle cx="120" cy="580" r="160" fill="#ffffff" opacity="0.05"/>
 <rect x="80" y="120" width="72" height="10" rx="5" fill="#fbbf24"/>
 ${heading}
-<text x="80" y="500" font-family="Verdana, Geneva, sans-serif" font-size="30" fill="#d1fae5">Kerala PSC • psccurrentaffairs.online</text>
+<text x="80" y="500" font-family="Verdana, 'Noto Sans Malayalam', Geneva, sans-serif" font-size="30" fill="#d1fae5">Kerala PSC • psccurrentaffairs.online</text>
 </svg>`;
   const png = await sharp(Buffer.from(svg)).png().toBuffer();
   return compressImage(png);
