@@ -20,7 +20,7 @@ export interface ScrapeSummary {
   results: { source: string; label: string; fetched: number; inserted: number; error: string | null }[];
   totalInserted: number;
   revalidated: boolean;
-  pageViewsPruned: number | null;
+  pageViewsRolledUp: number | null;
   hubSync: { changes: string[]; suggestions: string[]; tagged: number } | null;
 }
 
@@ -421,21 +421,23 @@ export async function runPscScrapeJob(ctx: Ctx, dryRun: boolean): Promise<Scrape
     revalidated = await revalidateSite(ctx, revalidatePaths);
   }
 
-  // Retention: page_views grows one row per visit — prune rows older
-  // than 90 days so the table can't eat the free-tier database quota.
-  // Best-effort: never fail the scrape if the RPC isn't installed yet.
-  let pageViewsPruned: number | null = null;
+  // Retention: page_views grows one row per visit — roll up rows older
+  // than 90 days into page_view_daily (lifetime totals, never pruned)
+  // and delete exactly those raw rows, in one transaction, so the table
+  // can't eat the free-tier database quota. Best-effort: never fail the
+  // scrape if the RPC isn't installed yet.
+  let pageViewsRolledUp: number | null = null;
   if (!dryRun) {
     try {
-      const prune = await fetch(`${ctx.sbUrl}/rest/v1/rpc/prune_page_views`, {
+      const rollup = await fetch(`${ctx.sbUrl}/rest/v1/rpc/rollup_page_views`, {
         method: "POST",
         headers: sbHeaders(ctx),
         body: JSON.stringify({ retention_days: 90 }),
         signal: AbortSignal.timeout(30000),
       });
-      if (prune.ok) pageViewsPruned = (await prune.json()) as number;
+      if (rollup.ok) pageViewsRolledUp = (await rollup.json()) as number;
     } catch {
-      pageViewsPruned = null;
+      pageViewsRolledUp = null;
     }
   }
 
@@ -444,7 +446,7 @@ export async function runPscScrapeJob(ctx: Ctx, dryRun: boolean): Promise<Scrape
     results,
     totalInserted,
     revalidated,
-    pageViewsPruned,
+    pageViewsRolledUp,
     hubSync: {
       changes: hubSync.changes,
       suggestions: hubSync.suggestions,
