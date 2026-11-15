@@ -10,7 +10,7 @@ import { createDraftPost, publishDraftPost, deleteDraftPost, updatePost, createC
  *   Authorization: Bearer <WORKER_SECRET>
  *   { "job": "publish-due-posts" | "publish-quiz" | "psc-scrape"
  *     | "news-scrape" | "create-post" | "publish-post" | "delete-post"
- *     | "update-post" | "create-quiz",
+ *     | "update-post" | "create-quiz" | "merge-categories",
  *     "slug"?: string, "dry_run"?: boolean,
  *     // create-post only: title, excerpt, content_html, category_slug, tags
  *     // create-quiz only: title, slug, description, post_slug,
@@ -37,6 +37,10 @@ import { createDraftPost, publishDraftPost, deleteDraftPost, updatePost, createC
  *   - create-quiz: create a quiz with questions, optionally linked to a
  *     digest post via post_slug (quizzes.post_id). Idempotent on slug.
  *     Status draft|published; published quizzes appear in /quiz.
+ *   - merge-categories: one-off duplicate-category cleanup (2026-11-15):
+ *     rename "currentaffairs" to "Current Affairs"/"current-affairs" and
+ *     merge "sports-and-awards" into "sports" (reassign posts + quizzes,
+ *     delete the duplicate row). Fixed operations only; dry_run supported.
  * After each job the worker asks the site to revalidate the affected
  * paths (its public pages are ISR-cached for 5 minutes).
  *
@@ -106,7 +110,7 @@ function sbHeaders(): HeadersInit {
 /** Supabase PostgREST call with the service-role key (bypasses RLS). */
 async function sb(
   path: string,
-  method: "GET" | "PATCH" = "GET",
+  method: "GET" | "PATCH" | "DELETE" = "GET",
   body?: unknown
 ): Promise<{ ok: boolean; status: number; data: unknown }> {
   const url = `${SB_URL}/rest/v1/${path}`;
@@ -299,6 +303,162 @@ async function jobPublishQuiz(slug: string, dryRun: boolean) {
   return { slug, already: false as const, published, revalidated, questionCount };
 }
 
+interface CategoryRow {
+  id: string;
+  name: string;
+  slug: string;
+}
+
+/**
+ * Merge duplicate categories — one-off cleanup (2026-11-15).
+ *   1. "currentaffairs" (display name "Currentaffairs") -> rename to
+ *      name "Current Affairs", slug "current-affairs" (no such row
+ *      exists yet). If a "current-affairs" row appears first, merge
+ *      into it instead.
+ *   2. "sports-and-awards" -> merge into "sports": reassign every post
+ *      and quiz that points at it, then delete the duplicate row.
+ * The operations are fixed and explicit — this job takes no slugs from
+ * the caller, so it cannot be pointed at an arbitrary category.
+ * dry_run reports the counts without writing anything.
+ */
+async function jobMergeCategories(dryRun: boolean) {
+  const found = await sb("categories?select=id,name,slug");
+  if (!found.ok) throw new Error(`Supabase read failed (${found.status})`);
+  const categories = found.data as CategoryRow[];
+  const bySlug = new Map(categories.map((c) => [c.slug, c]));
+
+  // Count every row (any status) referencing a category, paging past
+  // PostgREST's 1000-row cap.
+  async function countRefs(table: string, categoryId: string): Promise<number> {
+    let total = 0;
+    let offset = 0;
+    for (;;) {
+      const q = new URLSearchParams({
+        select: "id",
+        category_id: `eq.${categoryId}`,
+        limit: "1000",
+        offset: String(offset),
+      });
+      const r = await sb(`${table}?${q}`);
+      if (!r.ok) throw new Error(`Supabase read failed (${r.status})`);
+      const rows = Array.isArray(r.data) ? r.data : [];
+      total += rows.length;
+      if (rows.length < 1000) break;
+      offset += 1000;
+    }
+    return total;
+  }
+
+  // Reassign every post + quiz from one category to another.
+  async function reassign(fromId: string, toId: string): Promise<void> {
+    const rp = await sb(`posts?category_id=eq.${fromId}`, "PATCH", {
+      category_id: toId,
+    });
+    if (!rp.ok) throw new Error(`Reassign posts failed (${rp.status})`);
+    const rq = await sb(`quizzes?category_id=eq.${fromId}`, "PATCH", {
+      category_id: toId,
+    });
+    if (!rq.ok) throw new Error(`Reassign quizzes failed (${rq.status})`);
+  }
+
+  const operations: Record<string, unknown>[] = [];
+
+  // --- 1. Rename "currentaffairs" -> "Current Affairs" / "current-affairs".
+  const ca = bySlug.get("currentaffairs");
+  const caTarget = bySlug.get("current-affairs");
+  if (!ca) {
+    operations.push({
+      op: "rename",
+      from: "currentaffairs",
+      note: "source row not found — already done?",
+    });
+  } else if (caTarget) {
+    const posts = await countRefs("posts", ca.id);
+    const quizzes = await countRefs("quizzes", ca.id);
+    if (!dryRun) {
+      await reassign(ca.id, caTarget.id);
+      const del = await sb(`categories?id=eq.${ca.id}`, "DELETE");
+      if (!del.ok) throw new Error(`Delete category failed (${del.status})`);
+    }
+    operations.push({
+      op: "merge",
+      from: "currentaffairs",
+      to: "current-affairs",
+      posts_reassigned: posts,
+      quizzes_reassigned: quizzes,
+      deleted: !dryRun,
+    });
+  } else {
+    if (!dryRun) {
+      const upd = await sb(`categories?id=eq.${ca.id}`, "PATCH", {
+        name: "Current Affairs",
+        slug: "current-affairs",
+      });
+      if (!upd.ok) throw new Error(`Rename category failed (${upd.status})`);
+    }
+    operations.push({
+      op: "rename",
+      from: "currentaffairs",
+      to: "current-affairs",
+      name: "Current Affairs",
+      renamed: !dryRun,
+    });
+  }
+
+  // --- 2. Merge "sports-and-awards" into "sports".
+  const sa = bySlug.get("sports-and-awards");
+  const sp = bySlug.get("sports");
+  if (!sa) {
+    operations.push({
+      op: "merge",
+      from: "sports-and-awards",
+      note: "source row not found — already done?",
+    });
+  } else if (!sp) {
+    if (!dryRun) {
+      const upd = await sb(`categories?id=eq.${sa.id}`, "PATCH", {
+        name: "Sports",
+        slug: "sports",
+      });
+      if (!upd.ok) throw new Error(`Rename category failed (${upd.status})`);
+    }
+    operations.push({
+      op: "rename",
+      from: "sports-and-awards",
+      to: "sports",
+      name: "Sports",
+      renamed: !dryRun,
+    });
+  } else {
+    const posts = await countRefs("posts", sa.id);
+    const quizzes = await countRefs("quizzes", sa.id);
+    if (!dryRun) {
+      await reassign(sa.id, sp.id);
+      const del = await sb(`categories?id=eq.${sa.id}`, "DELETE");
+      if (!del.ok) throw new Error(`Delete category failed (${del.status})`);
+    }
+    operations.push({
+      op: "merge",
+      from: "sports-and-awards",
+      to: "sports",
+      posts_reassigned: posts,
+      quizzes_reassigned: quizzes,
+      deleted: !dryRun,
+    });
+  }
+
+  let revalidated = false;
+  if (!dryRun) {
+    revalidated = await revalidate([
+      "/",
+      "/current-affairs",
+      "/category/current-affairs",
+      "/category/sports",
+    ]);
+  }
+  return { operations, revalidated };
+}
+
 export async function POST(req: Request) {
   if (!authed(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -403,7 +563,7 @@ export async function POST(req: Request) {
         slug,
         excerpt: String(b.excerpt || ""),
         content_html,
-        category_slug: String(b.category_slug || "currentaffairs"),
+        category_slug: String(b.category_slug || "current-affairs"),
         tags: Array.isArray(b.tags) ? b.tags.map(String) : ["daily-digest"],
         status: b.status === "scheduled" ? "scheduled" : "draft",
         published_at: typeof b.published_at === "string" ? b.published_at : undefined,
@@ -520,8 +680,12 @@ export async function POST(req: Request) {
       });
       return NextResponse.json({ ok: true, job, ...r });
     }
+    if (job === "merge-categories") {
+      const r = await jobMergeCategories(dryRun);
+      return NextResponse.json({ ok: true, job, dry_run: dryRun, ...r });
+    }
     return NextResponse.json(
-      { error: "Unknown job. Use publish-due-posts, publish-quiz, psc-scrape, news-scrape, create-post, publish-post, delete-post, or create-quiz." },
+      { error: "Unknown job. Use publish-due-posts, publish-quiz, psc-scrape, news-scrape, create-post, publish-post, delete-post, create-quiz, or merge-categories." },
       { status: 400 }
     );
   } catch (err) {
