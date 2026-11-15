@@ -12,7 +12,8 @@ import { createDraftPost, publishDraftPost, deleteDraftPost, updatePost, createC
  *     | "news-scrape" | "create-post" | "publish-post" | "delete-post"
  *     | "update-post" | "create-quiz" | "merge-categories",
  *     "slug"?: string, "dry_run"?: boolean,
- *     // create-post only: title, excerpt, content_html, category_slug, tags
+ *     // create-post only: title, excerpt, content_html, category_slug, tags,
+ *     //   psc_relevance (standalone posts only, never digests)
  *     // create-quiz only: title, slug, description, post_slug,
  *     //   category_slug, difficulty, time_limit_seconds, status,
  *     //   questions: [{question, options[], correct_index, explanation}]
@@ -548,6 +549,7 @@ export async function POST(req: Request) {
         tags?: unknown;
         status?: unknown;
         published_at?: unknown;
+        psc_relevance?: unknown;
       };
       const title = String(b.title || "").trim();
       const slug = String(b.slug || "").trim();
@@ -567,6 +569,10 @@ export async function POST(req: Request) {
         tags: Array.isArray(b.tags) ? b.tags.map(String) : ["daily-digest"],
         status: b.status === "scheduled" ? "scheduled" : "draft",
         published_at: typeof b.published_at === "string" ? b.published_at : undefined,
+        psc_relevance:
+          typeof b.psc_relevance === "string" && b.psc_relevance.trim()
+            ? b.psc_relevance.trim()
+            : undefined,
       });
       return NextResponse.json({ ok: true, job, ...r });
     }
@@ -615,6 +621,7 @@ export async function POST(req: Request) {
         tags?: unknown;
         cover_image?: unknown;
         published_at?: unknown;
+        psc_relevance?: unknown;
       };
       const slug = String(b.slug || "").trim();
       if (!slug) return NextResponse.json({ error: "slug required." }, { status: 400 });
@@ -626,6 +633,7 @@ export async function POST(req: Request) {
         tags: Array.isArray(b.tags) ? (b.tags as unknown[]).map(String) : undefined,
         cover_image: b.cover_image === undefined ? undefined : String(b.cover_image),
         published_at: b.published_at === undefined ? undefined : String(b.published_at),
+        psc_relevance: b.psc_relevance === undefined ? undefined : String(b.psc_relevance),
       });
       return NextResponse.json({ ok: true, job, ...r });
     }

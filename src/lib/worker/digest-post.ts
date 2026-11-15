@@ -128,6 +128,10 @@ export interface CreatePostInput {
   tags?: string[];
   status?: "draft" | "scheduled";
   published_at?: string;
+  /** Exam-relevance line for STANDALONE posts only — never set for digests.
+      Only sent when provided (the column arrives with the 2026-11-15
+      migration); callers that omit it are unaffected. */
+  psc_relevance?: string;
 }
 
 /**
@@ -180,6 +184,9 @@ export async function createDraftPost(ctx: WorkerCtx, input: CreatePostInput) {
     published_at,
     meta_title: input.title,
     meta_description: input.excerpt || null,
+    ...(input.psc_relevance
+      ? { psc_relevance: input.psc_relevance }
+      : {}),
     author_id: null,
   });
   if (!ins.ok) {
@@ -242,6 +249,8 @@ export interface UpdatePostInput {
   tags?: string[];
   cover_image?: string;
   published_at?: string;
+  /** Exam-relevance line (standalone posts only); null/"" clears it. */
+  psc_relevance?: string;
 }
 
 /**
@@ -287,6 +296,8 @@ export async function updatePost(ctx: WorkerCtx, slug: string, input: UpdatePost
   }
   if (input.tags !== undefined) patch.tags = input.tags;
   if (input.cover_image !== undefined) patch.cover_image = input.cover_image || null;
+  if (input.psc_relevance !== undefined)
+    patch.psc_relevance = input.psc_relevance || null;
   if (input.published_at !== undefined && input.published_at.trim()) {
     const d = new Date(input.published_at.trim());
     if (isNaN(d.getTime())) throw new Error(`Invalid published_at: ${input.published_at}`);
