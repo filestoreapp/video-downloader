@@ -83,6 +83,34 @@ async function tgSend(
   return { ok: true };
 }
 
+/**
+ * Mint a /go/ short link for a site URL via the site's mint API, using the
+ * worker secret the worker already holds (same secret it authenticates to
+ * the site with). Any failure — mint API down, Neon cold start, bad
+ * response, secret unset — returns the full URL: a Telegram announcement
+ * must NEVER fail because the shortener is down.
+ */
+async function mintShortLink(ctx: WorkerCtx, url: string, label: string): Promise<string> {
+  try {
+    const secret = process.env.WORKER_SECRET || "";
+    if (!secret) return url;
+    const res = await fetch(`${ctx.siteUrl}/api/short-links/mint`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${secret}`,
+      },
+      body: JSON.stringify({ target_url: url, label }),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) return url;
+    const data = (await res.json()) as { ok?: boolean; short_url?: string };
+    return typeof data.short_url === "string" && data.short_url ? data.short_url : url;
+  } catch {
+    return url;
+  }
+}
+
 async function revalidate(ctx: WorkerCtx, paths: string[]): Promise<boolean> {
   if (!ctx.revalidateUrl || !ctx.revalidateSecret) return false;
   try {
@@ -411,7 +439,8 @@ export async function publishDraftPost(
   });
   if (!upd.ok) throw new Error(`Publish flip failed (${upd.status})`);
 
-  const link = `${ctx.siteUrl}${postPublicPath(post.slug)}`;
+  const fullLink = `${ctx.siteUrl}${postPublicPath(post.slug)}`;
+  const link = await mintShortLink(ctx, fullLink, post.slug);
   const caption =
     `📢 <b>${esc(post.title)}</b>\n\n${esc(post.excerpt ?? "")}\n\n🔗 ${link}\n\n📢 Join our channel: https://t.me/Daily_CurrentAffairs_Malayalam`;
   let tgNote = "";
@@ -456,7 +485,8 @@ export async function announcePostBySlug(ctx: WorkerCtx, slug: string) {
   const post = rows[0];
   if (!post) throw new Error(`No post found with slug "${slug}"`);
 
-  const link = `${ctx.siteUrl}${postPublicPath(post.slug)}`;
+  const fullLink = `${ctx.siteUrl}${postPublicPath(post.slug)}`;
+  const link = await mintShortLink(ctx, fullLink, post.slug);
   const caption =
     `📢 <b>${esc(post.title)}</b>\n\n${esc(post.excerpt ?? "")}\n\n🔗 ${link}\n\n📢 Join our channel: https://t.me/Daily_CurrentAffairs_Malayalam`;
   const tg = post.cover_image
