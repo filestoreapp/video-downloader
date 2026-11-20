@@ -10,7 +10,7 @@ import { createDraftPost, publishDraftPost, deleteDraftPost, updatePost, createC
  *   Authorization: Bearer <WORKER_SECRET>
  *   { "job": "publish-due-posts" | "publish-quiz" | "psc-scrape"
  *     | "news-scrape" | "create-post" | "publish-post" | "delete-post"
- *     | "update-post" | "create-quiz" | "merge-categories",
+ *     | "update-post" | "create-quiz" | "merge-categories" | "get-post",
  *     "slug"?: string, "dry_run"?: boolean,
  *     // create-post only: title, excerpt, content_html, category_slug, tags,
  *     //   psc_relevance (standalone posts only, never digests)
@@ -42,6 +42,9 @@ import { createDraftPost, publishDraftPost, deleteDraftPost, updatePost, createC
  *     rename "currentaffairs" to "Current Affairs"/"current-affairs" and
  *     merge "sports-and-awards" into "sports" (reassign posts + quizzes,
  *     delete the duplicate row). Fixed operations only; dry_run supported.
+ *   - get-post: read one post by slug (all statuses) and return its row,
+ *     including content_html. Read-only; used by maintenance jobs that
+ *     must edit a post's body in place (e.g. title/heading translation).
  * After each job the worker asks the site to revalidate the affected
  * paths (its public pages are ISR-cached for 5 minutes).
  *
@@ -491,6 +494,19 @@ export async function POST(req: Request) {
       if (!found.ok) throw new Error(`Supabase read failed (${found.status})`);
       const rows = found.data as { slug: string; title: string; published_at: string }[];
       return NextResponse.json({ ok: true, job, count: rows.length, posts: rows });
+    }
+    if (job === "get-post") {
+      const slug = String(body.slug || "").trim();
+      if (!slug) return NextResponse.json({ error: "slug required." }, { status: 400 });
+      const q = new URLSearchParams({
+        select: "id,slug,title,excerpt,content_html,status,published_at,cover_image,tags",
+        slug: `eq.${slug}`,
+      });
+      const found = await sb(`posts?${q}`);
+      if (!found.ok) throw new Error(`Supabase read failed (${found.status})`);
+      const rows = found.data as Record<string, unknown>[];
+      if (!rows.length) return NextResponse.json({ error: "Post not found." }, { status: 404 });
+      return NextResponse.json({ ok: true, job, post: rows[0] });
     }
     if (job === "publish-quiz") {
       const slug = String(body.slug || "").trim();
